@@ -1,10 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 void main() {
   runApp(const TextyleApp());
 }
 
-/// Root app
 class TextyleApp extends StatelessWidget {
   const TextyleApp({super.key});
 
@@ -17,31 +17,45 @@ class TextyleApp extends StatelessWidget {
         useMaterial3: true,
         scaffoldBackgroundColor: Colors.white,
       ),
-      home: const LoginPage(),
+      home: const AuthPage(),
     );
   }
 }
 
-/// ---------- Shared theme helpers ----------
+/// ---------- Shared theme ----------
 class AppColors {
-  static const bg = Color(0xfff8f7f4);
-  static const white = Colors.white;
+  static const bg = Color(0xFFF7F5F1);
+  static const surface = Colors.white;
+  static const surfaceSoft = Color(0xFFFCFBF8);
 
-  static const primary = Color(0xff0b7a69); // modern green/teal like screenshot
-  static const primaryDark = Color(0xff075f52);
+  static const primary = Color(0xFF0B7A69);
+  static const primaryDark = Color(0xFF075F52);
+  static const secondary = Color(0xFF234E7E);
 
-  static const textDark = Color(0xff1e1e1e);
-  static const textMuted = Color(0xff7a7a7a);
-  static const border = Color(0xffe7e5e1);
-  static const fieldFill = Color(0xffffffff);
-  static const hint = Color(0xffa1a1a1);
+  static const textDark = Color(0xFF1E1F22);
+  static const textMuted = Color(0xFF7A7D82);
+  static const hint = Color(0xFF9DA0A6);
+  static const border = Color(0xFFE2DED7);
 
-  static const navBg = Color(0xfff3d8db);
+  static const rail = Color(0xFFD4CFC7);
+  static const connector = Color(0xFFB2ACA3);
+
+  static const navBg = Color(0xFFF1ECE5);
+  static const shadow = Color(0x14000000);
+
+  static const fieldFill = Color(0xFFFFFFFF);
 }
 
 BoxDecoration appBackground() {
   return const BoxDecoration(
-    color: AppColors.bg,
+    gradient: LinearGradient(
+      colors: [
+        Color(0xFFF7F5F1),
+        Color(0xFFF5F2ED),
+      ],
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+    ),
   );
 }
 
@@ -55,452 +69,884 @@ InputDecoration modernFieldDecoration({
     hintStyle: const TextStyle(
       color: AppColors.hint,
       fontSize: 15,
+      fontWeight: FontWeight.w500,
     ),
     filled: true,
-    fillColor: AppColors.fieldFill,
-    prefixIcon: Icon(prefixIcon, color: AppColors.textMuted, size: 20),
+    fillColor: AppColors.surface,
+    prefixIcon: Icon(prefixIcon, color: AppColors.textMuted, size: 22),
     suffixIcon: suffixIcon,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(20),
       borderSide: const BorderSide(color: AppColors.border, width: 1.2),
     ),
     focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(16),
-      borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
+      borderRadius: BorderRadius.circular(20),
+      borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
     ),
   );
 }
 
-/// ---------- Login ----------
-class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+/// ---------- Single auth page ----------
+class AuthPage extends StatefulWidget {
+  const AuthPage({super.key});
 
   @override
-  State<LoginPage> createState() => _LoginPageState();
+  State<AuthPage> createState() => _AuthPageState();
 }
 
-class _LoginPageState extends State<LoginPage> {
+class _AuthPageState extends State<AuthPage> {
+  bool isSignUp = false;
   bool showPassword = false;
-
-  final emailController = TextEditingController();
-  final passwordController = TextEditingController();
-
-  void _demoLogin() {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const MainScaffold()),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: appBackground(),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 6),
-
-                /// Top clothing rack visual
-                Center(
-                  child: SizedBox(
-                    width: 280,
-                    height: 92,
-                    child: Stack(
-                      alignment: Alignment.topCenter,
-                      children: [
-                        Positioned(
-                          top: 8,
-                          left: 12,
-                          right: 12,
-                          child: Container(
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade300,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                        ),
-                        const Positioned(
-                          top: 0,
-                          left: 14,
-                          child: RackClothing(color: Color(0xfff1f1ef)),
-                        ),
-                        const Positioned(
-                          top: 0,
-                          left: 72,
-                          child: RackClothing(color: Color(0xff0b8c79)),
-                        ),
-                        const Positioned(
-                          top: 0,
-                          left: 130,
-                          child: RackClothing(color: Color(0xfff1f1ef)),
-                        ),
-                        const Positioned(
-                          top: 0,
-                          left: 188,
-                          child: RackClothing(color: Color(0xff123f6b)),
-                        ),
-                        const Positioned(
-                          top: 0,
-                          left: 246,
-                          child: RackClothing(color: Color(0xfff1f1ef)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 42),
-
-                /// Logo
-                Center(
-                  child: Column(
-                    children: [
-                      SizedBox(
-                        height: 58,
-                        child: Image.asset(
-                          'assets/textyle_logo.png',
-                          fit: BoxFit.contain,
-                          errorBuilder: (context, error, stackTrace) {
-                            return const Icon(
-                              Icons.checkroom_rounded,
-                              size: 42,
-                              color: AppColors.primary,
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        "more than just a walk-in",
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: AppColors.textMuted,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 38),
-
-                const Text(
-                  "Email Address",
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: AppColors.textDark,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: modernFieldDecoration(
-                    hint: "you@example.com",
-                    prefixIcon: Icons.email_outlined,
-                  ),
-                ),
-
-                const SizedBox(height: 22),
-
-                const Text(
-                  "Password",
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: AppColors.textDark,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: passwordController,
-                  obscureText: !showPassword,
-                  decoration: modernFieldDecoration(
-                    hint: "••••••••",
-                    prefixIcon: Icons.lock_outline_rounded,
-                    suffixIcon: IconButton(
-                      onPressed: () {
-                        setState(() {
-                          showPassword = !showPassword;
-                        });
-                      },
-                      icon: Icon(
-                        showPassword
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 16),
-
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        Transform.scale(
-                          scale: 0.95,
-                          child: Checkbox(
-                            value: true,
-                            onChanged: (_) {},
-                            activeColor: AppColors.primary,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                          ),
-                        ),
-                        const Text(
-                          "Remember me",
-                          style: TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                    TextButton(
-                      onPressed: () {},
-                      style: TextButton.styleFrom(
-                        foregroundColor: AppColors.textMuted,
-                        padding: EdgeInsets.zero,
-                      ),
-                      child: const Text(
-                        "Forgot password?",
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 18),
-
-                SizedBox(
-                  height: 56,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                    ),
-                    onPressed: _demoLogin,
-                    child: const Text(
-                      "Sign In",
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 22),
-
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text(
-                      "Don't have an account? ",
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const SignUpPage(),
-                          ),
-                        );
-                      },
-                      child: const Text(
-                        "Create account",
-                        style: TextStyle(
-                          color: AppColors.primary,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 16),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class RackClothing extends StatelessWidget {
-  final Color color;
-
-  const RackClothing({super.key, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Icon(
-          Icons.checkroom_outlined,
-          size: 22,
-          color: Colors.grey.shade500,
-        ),
-        Transform.translate(
-          offset: const Offset(0, -2),
-          child: Icon(
-            Icons.checkroom_rounded,
-            size: 40,
-            color: color,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// ---------- Sign up ----------
-class SignUpPage extends StatefulWidget {
-  const SignUpPage({super.key});
-
-  @override
-  State<SignUpPage> createState() => _SignUpPageState();
-}
-
-class _SignUpPageState extends State<SignUpPage> {
-  bool showPassword = false;
+  bool rememberMe = true;
 
   final nameController = TextEditingController();
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
 
-  void _demoSignUp() {
+  void _goToMainApp() {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const MainScaffold()),
     );
   }
 
+  void _switchToSignUp() {
+    setState(() {
+      isSignUp = true;
+      showPassword = false;
+    });
+  }
+
+  void _switchToLogin() {
+    setState(() {
+      isSignUp = false;
+      showPassword = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    nameController.dispose();
+    emailController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       body: Container(
         decoration: appBackground(),
         child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  alignment: Alignment.centerLeft,
-                  padding: EdgeInsets.zero,
-                  icon: const Icon(Icons.arrow_back_rounded),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  "Create Account",
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textDark,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            child: SizedBox(
+              height: MediaQuery.of(context).size.height -
+                  MediaQuery.of(context).padding.top -
+                  24,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 4),
+                  ClosetHeroHeader(
+                    animateClothes: isSignUp,
                   ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  "Join textyle and build your smart closet",
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: AppColors.textMuted,
+                  const SizedBox(height: 18),
+                  Center(
+                    child: Column(
+                      children: [
+                        SizedBox(
+                          height: 90,
+                          child: Image.asset(
+                            'assets/textyle_logo.png',
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) {
+                              return const Icon(
+                                Icons.checkroom_rounded,
+                                size: 54,
+                                color: AppColors.primary,
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        const Text(
+                          "more than just a walk-in",
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textMuted,
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: 0.1,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 28),
-                TextField(
-                  controller: nameController,
-                  decoration: modernFieldDecoration(
-                    hint: "Full name",
-                    prefixIcon: Icons.person_outline_rounded,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: emailController,
-                  decoration: modernFieldDecoration(
-                    hint: "Email",
-                    prefixIcon: Icons.email_outlined,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: passwordController,
-                  obscureText: !showPassword,
-                  decoration: modernFieldDecoration(
-                    hint: "Password",
-                    prefixIcon: Icons.lock_outline_rounded,
-                    suffixIcon: IconButton(
-                      onPressed: () {
-                        setState(() {
-                          showPassword = !showPassword;
-                        });
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 380),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      transitionBuilder: (child, animation) {
+                        return FadeTransition(
+                          opacity: animation,
+                          child: SlideTransition(
+                            position: Tween<Offset>(
+                              begin: const Offset(0.03, 0),
+                              end: Offset.zero,
+                            ).animate(animation),
+                            child: child,
+                          ),
+                        );
                       },
-                      icon: Icon(
-                        showPassword
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined,
-                        color: AppColors.textMuted,
-                      ),
+                      child: isSignUp ? _buildSignUpCard() : _buildLoginCard(),
                     ),
                   ),
-                ),
-                const SizedBox(height: 24),
-                SizedBox(
-                  height: 56,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                    ),
-                    onPressed: _demoSignUp,
-                    child: const Text(
-                      "Create Account",
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 17,
-                      ),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 18, top: 18),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          isSignUp
+                              ? "Already have an account? "
+                              : "Don't have an account? ",
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: isSignUp ? _switchToLogin : _switchToSignUp,
+                          child: Text(
+                            isSignUp ? "Log in" : "Sign up",
+                            style: const TextStyle(
+                              color: AppColors.primary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildLoginCard() {
+    return Container(
+      key: const ValueKey('login-card'),
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.76),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: AppColors.border),
+        boxShadow: const [
+          BoxShadow(
+            color: AppColors.shadow,
+            blurRadius: 20,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            "Email Address",
+            style: TextStyle(
+              fontSize: 14,
+              color: AppColors.textDark,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: emailController,
+            keyboardType: TextInputType.emailAddress,
+            decoration: modernFieldDecoration(
+              hint: "you@example.com",
+              prefixIcon: Icons.email_outlined,
+            ),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            "Password",
+            style: TextStyle(
+              fontSize: 14,
+              color: AppColors.textDark,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: passwordController,
+            obscureText: !showPassword,
+            decoration: modernFieldDecoration(
+              hint: "••••••••",
+              prefixIcon: Icons.lock_outline_rounded,
+              suffixIcon: IconButton(
+                onPressed: () {
+                  setState(() {
+                    showPassword = !showPassword;
+                  });
+                },
+                icon: Icon(
+                  showPassword
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                  color: AppColors.textMuted,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Transform.scale(
+                    scale: 0.92,
+                    child: Checkbox(
+                      value: rememberMe,
+                      onChanged: (value) {
+                        setState(() {
+                          rememberMe = value ?? false;
+                        });
+                      },
+                      activeColor: AppColors.primary,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      side: const BorderSide(
+                        color: AppColors.border,
+                        width: 1.2,
+                      ),
+                    ),
+                  ),
+                  const Text(
+                    "Remember me",
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+              TextButton(
+                onPressed: () {},
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.textMuted,
+                  padding: EdgeInsets.zero,
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text(
+                  "Forgot password?",
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          SizedBox(
+            height: 40,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+              onPressed: _goToMainApp,
+              child: const Text(
+                "Sign In",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSignUpCard() {
+    return Container(
+      key: const ValueKey('signup-card'),
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.76),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: AppColors.border),
+        boxShadow: const [
+          BoxShadow(
+            color: AppColors.shadow,
+            blurRadius: 20,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            "Create Account",
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textDark,
+              letterSpacing: -0.4,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            "Set up your account and start building your smart closet.",
+            style: TextStyle(
+              fontSize: 14,
+              color: AppColors.textMuted,
+              fontWeight: FontWeight.w500,
+              height: 1.35,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            "Full Name",
+            style: TextStyle(
+              fontSize: 14,
+              color: AppColors.textDark,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: nameController,
+            decoration: modernFieldDecoration(
+              hint: "Enter your full name",
+              prefixIcon: Icons.person_outline_rounded,
+            ),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            "Email",
+            style: TextStyle(
+              fontSize: 14,
+              color: AppColors.textDark,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: emailController,
+            keyboardType: TextInputType.emailAddress,
+            decoration: modernFieldDecoration(
+              hint: "Enter your email",
+              prefixIcon: Icons.email_outlined,
+            ),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            "Password",
+            style: TextStyle(
+              fontSize: 14,
+              color: AppColors.textDark,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: passwordController,
+            obscureText: !showPassword,
+            decoration: modernFieldDecoration(
+              hint: "Create a password",
+              prefixIcon: Icons.lock_outline_rounded,
+              suffixIcon: IconButton(
+                onPressed: () {
+                  setState(() {
+                    showPassword = !showPassword;
+                  });
+                },
+                icon: Icon(
+                  showPassword
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                  color: AppColors.textMuted,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            "Use 8+ characters for a stronger password.",
+            style: TextStyle(
+              fontSize: 13,
+              color: AppColors.textMuted,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const Spacer(),
+          SizedBox(
+            height: 48,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: EdgeInsets.zero,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+              onPressed: _goToMainApp,
+              child: const Text(
+                "Create Account",
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+enum GarmentType { shirt, hoodie, jacket }
+
+class ClosetHeroHeader extends StatefulWidget {
+  final bool animateClothes;
+
+  const ClosetHeroHeader({
+    super.key,
+    this.animateClothes = false,
+  });
+
+  @override
+  State<ClosetHeroHeader> createState() => _ClosetHeroHeaderState();
+}
+
+class _ClosetHeroHeaderState extends State<ClosetHeroHeader> {
+  late final PageController _pageController;
+  int _currentPage = 0;
+  bool _isAnimating = false;
+
+  final List<List<_GarmentData>> _looks = const [
+    [
+      _GarmentData(
+        color: Color(0xFFF2EFEB),
+        type: GarmentType.shirt,
+        faded: true,
+      ),
+      _GarmentData(
+        color: Color(0xFF6C8C7A),
+        type: GarmentType.shirt,
+      ),
+      _GarmentData(
+        color: AppColors.primary,
+        type: GarmentType.hoodie,
+      ),
+      _GarmentData(
+        color: AppColors.secondary,
+        type: GarmentType.jacket,
+      ),
+      _GarmentData(
+        color: Color(0xFF9F8C7A),
+        type: GarmentType.jacket,
+      ),
+      _GarmentData(
+        color: Color(0xFFB7C6D9),
+        type: GarmentType.shirt,
+      ),
+      _GarmentData(
+        color: Color(0xFFF2EFEB),
+        type: GarmentType.shirt,
+        faded: true,
+      ),
+    ],
+    [
+      _GarmentData(
+        color: Color(0xFFF2EFEB),
+        type: GarmentType.shirt,
+        faded: true,
+      ),
+      _GarmentData(
+        color: AppColors.secondary,
+        type: GarmentType.jacket,
+      ),
+      _GarmentData(
+        color: AppColors.primary,
+        type: GarmentType.hoodie,
+      ),
+      _GarmentData(
+        color: Color(0xFF7A8F6C),
+        type: GarmentType.shirt,
+      ),
+      _GarmentData(
+        color: Color(0xFF8A6D5B),
+        type: GarmentType.jacket,
+      ),
+      _GarmentData(
+        color: Color(0xFFBBC8B4),
+        type: GarmentType.shirt,
+      ),
+      _GarmentData(
+        color: Color(0xFFF2EFEB),
+        type: GarmentType.shirt,
+        faded: true,
+      ),
+    ],
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: 0);
+  }
+
+  @override
+  void didUpdateWidget(covariant ClosetHeroHeader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.animateClothes != widget.animateClothes) {
+      if (widget.animateClothes) {
+        _animateToPage(1);
+      } else {
+        _animateToPage(0);
+      }
+    }
+  }
+
+  Future<void> _animateToPage(int targetPage) async {
+    if (_isAnimating ||
+        !_pageController.hasClients ||
+        _currentPage == targetPage) {
+      return;
+    }
+
+    _isAnimating = true;
+    try {
+      await _pageController.animateToPage(
+        targetPage,
+        duration: const Duration(milliseconds: 520),
+        curve: Curves.easeInOutCubic,
+      );
+      _currentPage = targetPage;
+    } finally {
+      _isAnimating = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  Widget _buildRackBar() {
+    return Positioned(
+      top: 14,
+      left: 0,
+      right: 0,
+      child: Container(
+        height: 6,
+        decoration: BoxDecoration(
+          color: AppColors.rail,
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGarmentsPage(List<_GarmentData> garments) {
+    const start = 6.0;
+    const gap = 48.0;
+
+    return SizedBox(
+      height: 128,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          for (int i = 0; i < garments.length; i++)
+            Positioned(
+              top: 12,
+              left: start + (gap * i),
+              child: ProductRackGarment(
+                color: garments[i].color,
+                type: garments[i].type,
+                faded: garments[i].faded,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 128,
+      child: Stack(
+        children: [
+          _buildRackBar(),
+          Positioned.fill(
+            child: PageView.builder(
+              controller: _pageController,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _looks.length,
+              itemBuilder: (context, index) {
+                return _buildGarmentsPage(_looks[index]);
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GarmentData {
+  final Color color;
+  final GarmentType type;
+  final bool faded;
+
+  const _GarmentData({
+    required this.color,
+    required this.type,
+    this.faded = false,
+  });
+}
+
+class ProductRackGarment extends StatelessWidget {
+  final Color color;
+  final GarmentType type;
+  final bool faded;
+
+  const ProductRackGarment({
+    super.key,
+    required this.color,
+    required this.type,
+    this.faded = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hookColor = faded ? const Color(0xFFD7D3CD) : AppColors.connector;
+    final hangerColor =
+        faded ? const Color(0xFFD1CDC7) : const Color(0xFFA7A198);
+
+    return SizedBox(
+      width: 54,
+      height: 106,
+      child: Column(
+        children: [
+          Container(
+            width: 2,
+            height: 13,
+            color: hookColor,
+          ),
+          Icon(
+            Icons.checkroom_outlined,
+            size: 26,
+            color: hangerColor,
+          ),
+          Transform.translate(
+            offset: const Offset(0, -3),
+            child: Container(
+              width: 2,
+              height: 5,
+              color: hookColor,
+            ),
+          ),
+          Transform.translate(
+            offset: const Offset(0, -7),
+            child: SizedBox(
+              width: 46,
+              height: 56,
+              child: CustomPaint(
+                painter: GarmentPainter(
+                  color: color,
+                  faded: faded,
+                  type: type,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class GarmentPainter extends CustomPainter {
+  final Color color;
+  final bool faded;
+  final GarmentType type;
+
+  GarmentPainter({
+    required this.color,
+    required this.faded,
+    required this.type,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = _buildPath(size, type);
+
+    final shadowPaint = Paint()
+      ..color = Colors.black.withOpacity(faded ? 0.01 : 0.06)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+
+    canvas.save();
+    canvas.translate(0, 3);
+    canvas.drawPath(path, shadowPaint);
+    canvas.restore();
+
+    final fillPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: faded
+            ? [color.withOpacity(0.96), color]
+            : [_lighten(color, 0.10), color],
+      ).createShader(Offset.zero & size);
+
+    canvas.drawPath(path, fillPaint);
+
+    final highlightPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Colors.white.withOpacity(faded ? 0.06 : 0.18),
+          Colors.transparent,
+        ],
+      ).createShader(Offset.zero & size);
+
+    final highlight = RRect.fromRectAndRadius(
+      Rect.fromLTWH(8, 2, size.width - 16, 12),
+      const Radius.circular(12),
+    );
+    canvas.drawRRect(highlight, highlightPaint);
+  }
+
+  Path _buildPath(Size size, GarmentType type) {
+    switch (type) {
+      case GarmentType.shirt:
+        return _shirtPath(size);
+      case GarmentType.hoodie:
+        return _hoodiePath(size);
+      case GarmentType.jacket:
+        return _jacketPath(size);
+    }
+  }
+
+  Path _shirtPath(Size size) {
+    final w = size.width;
+    final h = size.height;
+    final p = Path();
+    p.moveTo(w * 0.34, h * 0.12);
+    p.lineTo(w * 0.22, h * 0.20);
+    p.lineTo(w * 0.10, h * 0.34);
+    p.quadraticBezierTo(w * 0.08, h * 0.40, w * 0.15, h * 0.47);
+    p.lineTo(w * 0.22, h * 0.40);
+    p.lineTo(w * 0.22, h * 0.84);
+    p.quadraticBezierTo(w * 0.22, h * 0.96, w * 0.36, h * 0.96);
+    p.lineTo(w * 0.64, h * 0.96);
+    p.quadraticBezierTo(w * 0.78, h * 0.96, w * 0.78, h * 0.84);
+    p.lineTo(w * 0.78, h * 0.40);
+    p.lineTo(w * 0.85, h * 0.47);
+    p.quadraticBezierTo(w * 0.92, h * 0.40, w * 0.90, h * 0.34);
+    p.lineTo(w * 0.78, h * 0.20);
+    p.lineTo(w * 0.66, h * 0.12);
+    p.quadraticBezierTo(w * 0.58, h * 0.24, w * 0.50, h * 0.24);
+    p.quadraticBezierTo(w * 0.42, h * 0.24, w * 0.34, h * 0.12);
+    p.close();
+    return p;
+  }
+
+  Path _hoodiePath(Size size) {
+    final w = size.width;
+    final h = size.height;
+    final p = Path();
+    p.moveTo(w * 0.28, h * 0.16);
+    p.quadraticBezierTo(w * 0.35, h * 0.02, w * 0.50, h * 0.02);
+    p.quadraticBezierTo(w * 0.65, h * 0.02, w * 0.72, h * 0.16);
+    p.lineTo(w * 0.82, h * 0.26);
+    p.lineTo(w * 0.92, h * 0.42);
+    p.quadraticBezierTo(w * 0.94, h * 0.48, w * 0.87, h * 0.53);
+    p.lineTo(w * 0.80, h * 0.48);
+    p.lineTo(w * 0.78, h * 0.84);
+    p.quadraticBezierTo(w * 0.78, h * 0.96, w * 0.66, h * 0.96);
+    p.lineTo(w * 0.34, h * 0.96);
+    p.quadraticBezierTo(w * 0.22, h * 0.96, w * 0.22, h * 0.84);
+    p.lineTo(w * 0.20, h * 0.48);
+    p.lineTo(w * 0.13, h * 0.53);
+    p.quadraticBezierTo(w * 0.06, h * 0.48, w * 0.08, h * 0.42);
+    p.lineTo(w * 0.18, h * 0.26);
+    p.close();
+    return p;
+  }
+
+  Path _jacketPath(Size size) {
+    final w = size.width;
+    final h = size.height;
+    final p = Path();
+    p.moveTo(w * 0.32, h * 0.10);
+    p.lineTo(w * 0.18, h * 0.22);
+    p.lineTo(w * 0.08, h * 0.42);
+    p.quadraticBezierTo(w * 0.06, h * 0.48, w * 0.14, h * 0.52);
+    p.lineTo(w * 0.20, h * 0.46);
+    p.lineTo(w * 0.24, h * 0.90);
+    p.quadraticBezierTo(w * 0.24, h * 0.96, w * 0.31, h * 0.96);
+    p.lineTo(w * 0.69, h * 0.96);
+    p.quadraticBezierTo(w * 0.76, h * 0.96, w * 0.76, h * 0.90);
+    p.lineTo(w * 0.80, h * 0.46);
+    p.lineTo(w * 0.86, h * 0.52);
+    p.quadraticBezierTo(w * 0.94, h * 0.48, w * 0.92, h * 0.42);
+    p.lineTo(w * 0.82, h * 0.22);
+    p.lineTo(w * 0.68, h * 0.10);
+    p.lineTo(w * 0.56, h * 0.28);
+    p.lineTo(w * 0.52, h * 0.96);
+    p.lineTo(w * 0.48, h * 0.96);
+    p.lineTo(w * 0.44, h * 0.28);
+    p.close();
+    return p;
+  }
+
+  Color _lighten(Color c, double amount) {
+    final hsl = HSLColor.fromColor(c);
+    return hsl
+        .withLightness((hsl.lightness + amount).clamp(0.0, 1.0))
+        .toColor();
+  }
+
+  @override
+  bool shouldRepaint(covariant GarmentPainter oldDelegate) {
+    return oldDelegate.color != color ||
+        oldDelegate.faded != faded ||
+        oldDelegate.type != type;
   }
 }
 
@@ -513,11 +959,11 @@ class MainScaffold extends StatefulWidget {
 }
 
 class _MainScaffoldState extends State<MainScaffold> {
-  int index = 0;
+  int index = 1;
 
   final pages = const [
-    HomePage(),
     InventoryPage(),
+    HomePage(),
     UploadPage(),
   ];
 
@@ -526,37 +972,51 @@ class _MainScaffoldState extends State<MainScaffold> {
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: SafeArea(child: pages[index]),
-      bottomNavigationBar: Container(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
-        decoration: const BoxDecoration(
-          color: AppColors.navBg,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(18),
-            topRight: Radius.circular(18),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+          child: Container(
+            height: 66,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: AppColors.navBg,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+              border: Border.all(
+                color: Colors.white.withOpacity(0.7),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                _NavItem(
+                  label: "Inventory",
+                  icon: Icons.inventory_2_rounded,
+                  selected: index == 0,
+                  onTap: () => setState(() => index = 0),
+                ),
+                _NavItem(
+                  label: "Home",
+                  icon: Icons.home_rounded,
+                  selected: index == 1,
+                  onTap: () => setState(() => index = 1),
+                ),
+                _NavItem(
+                  label: "Upload",
+                  icon: Icons.add_box_rounded,
+                  selected: index == 2,
+                  onTap: () => setState(() => index = 2),
+                ),
+              ],
+            ),
           ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _NavItem(
-              label: "Home",
-              icon: Icons.home_rounded,
-              selected: index == 0,
-              onTap: () => setState(() => index = 0),
-            ),
-            _NavItem(
-              label: "Inventory",
-              icon: Icons.inventory_2_rounded,
-              selected: index == 1,
-              onTap: () => setState(() => index = 1),
-            ),
-            _NavItem(
-              label: "Upload",
-              icon: Icons.add_box_rounded,
-              selected: index == 2,
-              onTap: () => setState(() => index = 2),
-            ),
-          ],
         ),
       ),
     );
@@ -578,29 +1038,66 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? Colors.white.withOpacity(0.55) : Colors.transparent,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: AppColors.primary),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 12,
-                color: AppColors.primary,
-                fontWeight: FontWeight.w600,
-              ),
+    final bool isHome = label == "Home";
+    final bool showRaisedHome = isHome && selected;
+
+    return Expanded(
+      child: Center(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            width: isHome ? 92 : 78,
+            height: showRaisedHome ? 58 : 44,
+            decoration: BoxDecoration(
+              color: selected
+                  ? (showRaisedHome
+                      ? const Color(0xFFF3EEE8)
+                      : const Color(0xFFF4EEE8).withOpacity(0.75))
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: showRaisedHome
+                  ? [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.06),
+                        blurRadius: 12,
+                        offset: const Offset(0, 5),
+                      ),
+                    ]
+                  : [],
+              border: selected
+                  ? Border.all(
+                      color: Colors.white.withOpacity(0.45),
+                      width: 1,
+                    )
+                  : null,
             ),
-          ],
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: isHome ? 22 : 19,
+                  color: selected
+                      ? AppColors.primary.withOpacity(0.92)
+                      : AppColors.textMuted.withOpacity(0.78),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: isHome ? 13.5 : 12.5,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: selected
+                        ? AppColors.primary.withOpacity(0.92)
+                        : AppColors.textMuted.withOpacity(0.88),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -633,7 +1130,7 @@ class HomePage extends StatelessWidget {
               IconButton(
                 onPressed: () {
                   Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(builder: (_) => const LoginPage()),
+                    MaterialPageRoute(builder: (_) => const AuthPage()),
                   );
                 },
                 icon: const Icon(Icons.logout_rounded),
@@ -911,6 +1408,7 @@ class UploadPage extends StatelessWidget {
 /// ---------- Small reusable widgets ----------
 class _Card extends StatelessWidget {
   final Widget child;
+
   const _Card({required this.child});
 
   @override
@@ -918,9 +1416,16 @@ class _Card extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.75),
-        borderRadius: BorderRadius.circular(20),
+        color: Colors.white.withOpacity(0.78),
+        borderRadius: BorderRadius.circular(22),
         border: Border.all(color: AppColors.border),
+        boxShadow: const [
+          BoxShadow(
+            color: AppColors.shadow,
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
       ),
       child: child,
     );
@@ -946,9 +1451,9 @@ class _PillButton extends StatelessWidget {
       child: Container(
         height: 46,
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.55),
+          color: Colors.white.withOpacity(0.6),
           borderRadius: BorderRadius.circular(30),
-          border: Border.all(color: AppColors.primary.withOpacity(0.25)),
+          border: Border.all(color: AppColors.primary.withOpacity(0.22)),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -992,7 +1497,7 @@ class _QuickAction extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.60),
+          color: Colors.white.withOpacity(0.64),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: AppColors.border),
         ),
