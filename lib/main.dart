@@ -4,6 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+<<<<<<< HEAD
+=======
+
+>>>>>>> a35f904 (weather api, upload screen, inventory screen)
 void main() {
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
@@ -94,6 +98,85 @@ InputDecoration modernFieldDecoration({
       borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
     ),
   );
+}
+
+/// ---------- Shared weather helpers ----------
+const double _hamiltonLatitude = 43.2557;
+const double _hamiltonLongitude = -79.8711;
+
+Future<Map<String, dynamic>> fetchHamiltonWeather() async {
+  final uri = Uri.parse(
+    'https://api.open-meteo.com/v1/forecast'
+    '?latitude=$_hamiltonLatitude'
+    '&longitude=$_hamiltonLongitude'
+    '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code,is_day'
+    '&timezone=auto',
+  );
+
+  final response = await http.get(uri);
+
+  if (response.statusCode != 200) {
+    throw Exception('Failed to load weather');
+  }
+
+  final data = jsonDecode(response.body) as Map<String, dynamic>;
+  return Map<String, dynamic>.from(data['current'] as Map);
+}
+
+String weatherDescription(int code) {
+  switch (code) {
+    case 0:
+      return 'Clear sky';
+    case 1:
+      return 'Mainly clear';
+    case 2:
+      return 'Partly cloudy';
+    case 3:
+      return 'Overcast';
+    case 45:
+    case 48:
+      return 'Fog';
+    case 51:
+    case 53:
+    case 55:
+      return 'Drizzle';
+    case 61:
+    case 63:
+    case 65:
+      return 'Rain';
+    case 71:
+    case 73:
+    case 75:
+      return 'Snow';
+    case 80:
+    case 81:
+    case 82:
+      return 'Rain showers';
+    case 95:
+      return 'Thunderstorm';
+    default:
+      return 'Unknown';
+  }
+}
+
+IconData weatherIcon(int code, int isDay) {
+  if (code == 0) {
+    return isDay == 1 ? Icons.wb_sunny_rounded : Icons.nightlight_round;
+  } else if (code >= 1 && code <= 3) {
+    return Icons.cloud_rounded;
+  } else if (code == 45 || code == 48) {
+    return Icons.foggy;
+  } else if ((code >= 51 && code <= 55) ||
+      (code >= 61 && code <= 65) ||
+      (code >= 80 && code <= 82)) {
+    return Icons.grain;
+  } else if (code >= 71 && code <= 75) {
+    return Icons.ac_unit;
+  } else if (code == 95) {
+    return Icons.thunderstorm;
+  } else {
+    return Icons.cloud_outlined;
+  }
 }
 
 /// ---------- One page at a time physics ----------
@@ -541,7 +624,7 @@ class _AuthPageState extends State<AuthPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const SizedBox(height: 18),
+                const SizedBox(height: 10),
                 SizedBox(
                   height: 70,
                   child: Image.asset(
@@ -664,32 +747,52 @@ class _AuthPageState extends State<AuthPage> {
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               child: LayoutBuilder(
                 builder: (context, constraints) {
+                  final isShort = constraints.maxHeight < 760;
+                  final isVeryShort = constraints.maxHeight < 690;
+
+                  final topGap = isVeryShort ? 6.0 : 14.0;
+                  final rackGap = isVeryShort ? 6.0 : 10.0;
+                  final brandGap = isVeryShort ? 12.0 : 18.0;
+
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const SizedBox(height: 20),
+                      SizedBox(height: topGap),
                       ClosetHeroHeader(
                         key: _heroKey,
                         onIntroComplete: _handleRackIntroComplete,
                       ),
-                      const SizedBox(height: 8),
+                      SizedBox(height: rackGap),
                       Expanded(
-  child: AnimatedPadding(
-    duration: const Duration(milliseconds: 250),
-    curve: Curves.easeOut,
-    padding: EdgeInsets.only(
-      bottom: MediaQuery.of(context).viewInsets.bottom,
-    ),
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        _buildBrandBlock(),
-        const SizedBox(height: 10),
-        _buildAuthSection(),
-      ],
-    ),
-  ),
-),
+                        child: LayoutBuilder(
+                          builder: (context, innerConstraints) {
+                            return SingleChildScrollView(
+                              keyboardDismissBehavior:
+                                  ScrollViewKeyboardDismissBehavior.onDrag,
+                              physics: const BouncingScrollPhysics(),
+                              padding: EdgeInsets.only(
+                                bottom: keyboardInset + 12,
+                              ),
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  minHeight: innerConstraints.maxHeight,
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: isShort
+                                      ? MainAxisAlignment.start
+                                      : MainAxisAlignment.center,
+                                  children: [
+                                    _buildBrandBlock(),
+                                    SizedBox(height: brandGap),
+                                    _buildAuthSection(),
+                                    const SizedBox(height: 12),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
                     ],
                   );
                 },
@@ -1518,6 +1621,7 @@ class _HomePageState extends State<HomePage> {
   ClothingOption? selectedBottom = _bottoms[0];
 
   late final PageController _closetPageController;
+  late Future<Map<String, dynamic>> _homeWeatherFuture;
   int closetPageIndex = 0;
 
   static const List<ClothingOption> _tops = [
@@ -1602,6 +1706,7 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _closetPageController = PageController();
+    _homeWeatherFuture = fetchHamiltonWeather();
   }
 
   @override
@@ -1630,6 +1735,100 @@ class _HomePageState extends State<HomePage> {
       case ClosetCategory.bottoms:
         return selectedBottom?.id == option.id;
     }
+  }
+
+  void _openWeatherDetails() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const WeatherDetailPage(),
+      ),
+    );
+  }
+
+  Widget _buildWeatherChip() {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _homeWeatherFuture,
+      builder: (context, snapshot) {
+        Widget leading;
+        String label;
+
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          leading = const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: AppColors.primary,
+            ),
+          );
+          label = "Loading";
+        } else if (snapshot.hasData) {
+          final current = snapshot.data!;
+          final temp = (current['temperature_2m'] as num).toDouble();
+          final code = current['weather_code'] as int;
+          final isDay = current['is_day'] as int;
+
+          leading = Icon(
+            weatherIcon(code, isDay),
+            size: 16,
+            color: AppColors.primary,
+          );
+          label = "${temp.toStringAsFixed(0)}°C";
+        } else {
+          leading = const Icon(
+            Icons.cloud_off_outlined,
+            size: 16,
+            color: AppColors.primary,
+          );
+          label = "Weather";
+        }
+
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: _openWeatherDetails,
+            borderRadius: BorderRadius.circular(24),
+            child: Container(
+              height: 42,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.72),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white.withOpacity(0.85)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.03),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  leading,
+                  const SizedBox(width: 7),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textDark,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: AppColors.textMuted,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -1708,41 +1907,7 @@ class _HomePageState extends State<HomePage> {
             },
           ),
           const SizedBox(width: 10),
-          Container(
-            height: 42,
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.72),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: Colors.white.withOpacity(0.85)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.03),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.cloud_outlined,
-                  size: 16,
-                  color: AppColors.primary,
-                ),
-                SizedBox(width: 7),
-                Text(
-                  "18°C",
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textDark,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          _buildWeatherChip(),
           const Spacer(),
           _ModernCircleButton(
             icon: Icons.person_outline_rounded,
@@ -2612,136 +2777,325 @@ class _PillButton extends StatelessWidget {
   }
 }
 /// ---------- Inventory ----------
-class InventoryPage extends StatelessWidget {
+class InventoryItem {
+  final String name;
+  final String category;
+  final String lastWorn;
+  final String lastWashed;
+  final Color color;
+  final ClosetCategory previewCategory;
+  final String notes;
+  final int wears;
+  final String season;
+
+  const InventoryItem({
+    required this.name,
+    required this.category,
+    required this.lastWorn,
+    required this.lastWashed,
+    required this.color,
+    required this.previewCategory,
+    required this.notes,
+    required this.wears,
+    required this.season,
+  });
+}
+
+class InventoryPage extends StatefulWidget {
   const InventoryPage({super.key});
+
+  @override
+  State<InventoryPage> createState() => _InventoryPageState();
+}
+
+class _InventoryPageState extends State<InventoryPage> {
+  static const List<InventoryItem> _allItems = [
+    InventoryItem(
+      name: "White Button-Down",
+      category: "Top",
+      lastWorn: "Worn 3 days ago",
+      lastWashed: "Washed 1 week ago",
+      color: Color(0xFFE8E2D7),
+      previewCategory: ClosetCategory.tops,
+      notes:
+          "A lightweight button-down that works well for formal and smart-casual outfits.",
+      wears: 12,
+      season: "All Season",
+    ),
+    InventoryItem(
+      name: "Charcoal Trousers",
+      category: "Bottom",
+      lastWorn: "Worn yesterday",
+      lastWashed: "Washed 5 days ago",
+      color: Color(0xFF5B5E64),
+      previewCategory: ClosetCategory.bottoms,
+      notes:
+          "Structured charcoal trousers that pair well with neutral tops and layered pieces.",
+      wears: 18,
+      season: "Fall / Winter",
+    ),
+    InventoryItem(
+      name: "Denim Jacket",
+      category: "Outerwear",
+      lastWorn: "Worn 1 week ago",
+      lastWashed: "Washed 2 weeks ago",
+      color: Color(0xFF7E9EC2),
+      previewCategory: ClosetCategory.tops,
+      notes:
+          "Classic denim jacket for layering on cooler days and casual looks.",
+      wears: 9,
+      season: "Spring / Fall",
+    ),
+  ];
+
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+
+  bool _showSearch = false;
+  String _query = '';
+
+  List<InventoryItem> get _filteredItems {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return _allItems;
+    return _allItems
+        .where((item) => item.name.toLowerCase().contains(q))
+        .toList();
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _showSearch = !_showSearch;
+
+      if (!_showSearch) {
+        _searchController.clear();
+        _query = '';
+        _searchFocusNode.unfocus();
+      }
+    });
+
+    if (_showSearch) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _searchFocusNode.requestFocus();
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: appBackground(),
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
-        children: const [
-          Text(
-            "Inventory",
-            style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textDark,
-            ),
-          ),
-          SizedBox(height: 8),
-          Text(
-            "Track your clothing usage and washing habits.",
-            style: TextStyle(fontSize: 14, color: AppColors.textMuted),
-          ),
-          SizedBox(height: 16),
-          _InventoryTile(
-            name: "White Button-Down",
-            lastWorn: "Worn 3 days ago",
-            lastWashed: "Washed 1 week ago",
-          ),
-          SizedBox(height: 10),
-          _InventoryTile(
-            name: "Charcoal Trousers",
-            lastWorn: "Worn yesterday",
-            lastWashed: "Washed 5 days ago",
-          ),
-          SizedBox(height: 10),
-          _InventoryTile(
-            name: "Denim Jacket",
-            lastWorn: "Worn 1 week ago",
-            lastWashed: "Washed 2 weeks ago",
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _InventoryTile extends StatelessWidget {
-  final String name;
-  final String lastWorn;
-  final String lastWashed;
-
-  const _InventoryTile({
-    required this.name,
-    required this.lastWorn,
-    required this.lastWashed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return _Card(
-      child: Row(
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: AppColors.fieldFill,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(Icons.checkroom_rounded, color: AppColors.primary),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textDark,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 104),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(36),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(36),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.white.withOpacity(0.84),
+                      Colors.white.withOpacity(0.72),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.access_time,
-                      size: 14,
-                      color: AppColors.textMuted,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      lastWorn,
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 12,
-                      ),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.88),
+                    width: 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.07),
+                      blurRadius: 30,
+                      offset: const Offset(0, 18),
                     ),
                   ],
                 ),
-                const SizedBox(height: 2),
-                Row(
+                child: Stack(
                   children: [
-                    const Icon(
-                      Icons.local_laundry_service,
-                      size: 14,
-                      color: AppColors.textMuted,
+                    const Positioned.fill(
+                      child: _InventoryAmbientBackground(),
                     ),
-                    const SizedBox(width: 4),
-                    Text(
-                      lastWashed,
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 12,
-                      ),
+                    ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Expanded(
+                              child: Padding(
+                                padding: EdgeInsets.only(top: 6),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      "Inventory",
+                                      style: TextStyle(
+                                        fontSize: 28,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppColors.textDark,
+                                        letterSpacing: -0.6,
+                                      ),
+                                    ),
+                                    SizedBox(height: 6),
+                                    Text(
+                                      "Track your clothing usage and washing habits.",
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: AppColors.textMuted,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            _ModernCircleButton(
+                              icon: _showSearch
+                                  ? Icons.close_rounded
+                                  : Icons.search_rounded,
+                              onTap: _toggleSearch,
+                            ),
+                          ],
+                        ),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 220),
+                          switchInCurve: Curves.easeOutCubic,
+                          switchOutCurve: Curves.easeInCubic,
+                          child: !_showSearch
+                              ? const SizedBox(height: 18)
+                              : Padding(
+                                  key: const ValueKey('inventory-search'),
+                                  padding:
+                                      const EdgeInsets.only(top: 16, bottom: 18),
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.84),
+                                      borderRadius: BorderRadius.circular(22),
+                                      border: Border.all(
+                                        color: Colors.white.withOpacity(0.94),
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.04),
+                                          blurRadius: 14,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                      ],
+                                    ),
+                                    child: TextField(
+                                      controller: _searchController,
+                                      focusNode: _searchFocusNode,
+                                      onChanged: (value) {
+                                        setState(() {
+                                          _query = value;
+                                        });
+                                      },
+                                      decoration: InputDecoration(
+                                        hintText: "Search clothing by name",
+                                        hintStyle: const TextStyle(
+                                          color: AppColors.textMuted,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        prefixIcon: const Icon(
+                                          Icons.search_rounded,
+                                          color: AppColors.textMuted,
+                                        ),
+                                        suffixIcon: _query.isEmpty
+                                            ? null
+                                            : IconButton(
+                                                onPressed: () {
+                                                  _searchController.clear();
+                                                  setState(() {
+                                                    _query = '';
+                                                  });
+                                                  _searchFocusNode.requestFocus();
+                                                },
+                                                icon: const Icon(
+                                                  Icons.close_rounded,
+                                                  color: AppColors.textMuted,
+                                                ),
+                                              ),
+                                        border: InputBorder.none,
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                          horizontal: 18,
+                                          vertical: 16,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                        ),
+                        if (_filteredItems.isEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 22,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.78),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.94),
+                              ),
+                            ),
+                            child: Text(
+                              'No clothing found for "$_query".',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          )
+                        else
+                          ..._filteredItems.map(
+                            (item) => Padding(
+                              padding: const EdgeInsets.only(bottom: 14),
+                              child: _InventoryTile(
+                                item: item,
+                                onTap: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          InventoryDetailPage(item: item),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ),
-              ],
+              ),
             ),
           ),
-          const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted),
-        ],
+        ),
       ),
     );
   }
 }
 
+<<<<<<< HEAD
 class WeatherPage extends StatefulWidget {
   const WeatherPage({super.key});
 
@@ -3025,65 +3379,671 @@ class _WeatherStat extends StatelessWidget {
 /// ---------- Upload ----------
 class UploadPage extends StatelessWidget {
   const UploadPage({super.key});
+=======
+class _InventoryAmbientBackground extends StatelessWidget {
+  const _InventoryAmbientBackground();
+>>>>>>> a35f904 (weather api, upload screen, inventory screen)
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Stack(
+        children: [
+          Positioned(
+            left: -78,
+            top: 150,
+            child: _AmbientShape(
+              width: 225,
+              height: 255,
+              color: const Color(0xFFDDE8E1).withOpacity(0.52),
+              radius: 115,
+            ),
+          ),
+          Positioned(
+            right: -88,
+            top: 250,
+            child: _AmbientShape(
+              width: 250,
+              height: 235,
+              color: const Color(0xFFE5E7EC).withOpacity(0.46),
+              radius: 120,
+            ),
+          ),
+          Positioned(
+            left: 110,
+            top: 320,
+            child: _AmbientShape(
+              width: 170,
+              height: 170,
+              color: Colors.white.withOpacity(0.16),
+              radius: 100,
+            ),
+          ),
+          Positioned(
+            left: 28,
+            right: 28,
+            bottom: 20,
+            child: Container(
+              height: 180,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(42),
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.white.withOpacity(0.00),
+                    const Color(0xFFF3EEE8).withOpacity(0.14),
+                    const Color(0xFFF3EEE8).withOpacity(0.24),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AmbientShape extends StatelessWidget {
+  final double width;
+  final double height;
+  final double radius;
+  final Color color;
+
+  const _AmbientShape({
+    required this.width,
+    required this.height,
+    required this.radius,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ImageFiltered(
+      imageFilter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(radius),
+        ),
+      ),
+    );
+  }
+}
+
+class _InventoryTile extends StatelessWidget {
+  final InventoryItem item;
+  final VoidCallback onTap;
+
+  const _InventoryTile({
+    required this.item,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(28),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.82),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(
+              color: Colors.white.withOpacity(0.94),
+              width: 1.0,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.045),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 84,
+                height: 84,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF7F4EF),
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: Center(
+                  child: _InventoryPreview(
+                    category: item.previewCategory,
+                    color: item.color,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        item.name,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textDark,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.access_time_rounded,
+                            size: 15,
+                            color: AppColors.textMuted,
+                          ),
+                          const SizedBox(width: 7),
+                          Expanded(
+                            child: Text(
+                              item.lastWorn,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: AppColors.textMuted,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.local_laundry_service_outlined,
+                            size: 15,
+                            color: AppColors.textMuted,
+                          ),
+                          const SizedBox(width: 7),
+                          Expanded(
+                            child: Text(
+                              item.lastWashed,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: AppColors.textMuted,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 28,
+                color: Colors.black.withOpacity(0.35),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InventoryPreview extends StatelessWidget {
+  final ClosetCategory category;
+  final Color color;
+
+  const _InventoryPreview({
+    required this.category,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Container(
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              colors: [
+                color.withOpacity(0.14),
+                color.withOpacity(0.04),
+              ],
+            ),
+          ),
+        ),
+        _ClothingPreviewCard(
+          category: category,
+          color: color,
+        ),
+      ],
+    );
+  }
+}
+
+class InventoryDetailPage extends StatelessWidget {
+  final InventoryItem item;
+
+  const InventoryDetailPage({
+    super.key,
+    required this.item,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Container(
+        decoration: appBackground(),
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 24),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(36),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(36),
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.white.withOpacity(0.84),
+                        Colors.white.withOpacity(0.72),
+                      ],
+                    ),
+                    border: Border.all(
+                      color: Colors.white.withOpacity(0.88),
+                      width: 1.2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.07),
+                        blurRadius: 30,
+                        offset: const Offset(0, 18),
+                      ),
+                    ],
+                  ),
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                    children: [
+                      Row(
+                        children: [
+                          _ModernCircleButton(
+                            icon: Icons.arrow_back_rounded,
+                            onTap: () => Navigator.of(context).pop(),
+                          ),
+                          const Spacer(),
+                          _ModernCircleButton(
+                            icon: Icons.more_horiz_rounded,
+                            onTap: () {},
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Container(
+                        height: 240,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF7F4EF),
+                          borderRadius: BorderRadius.circular(30),
+                        ),
+                        child: Center(
+                          child: Transform.scale(
+                            scale: 2.15,
+                            child: _ClothingPreviewCard(
+                              category: item.previewCategory,
+                              color: item.color,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        item.name,
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textDark,
+                          letterSpacing: -0.6,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        item.category,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: AppColors.textMuted,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      _InventoryInfoCard(
+                        icon: Icons.access_time_rounded,
+                        label: "Last worn",
+                        value: item.lastWorn.replaceFirst("Worn ", ""),
+                      ),
+                      const SizedBox(height: 12),
+                      _InventoryInfoCard(
+                        icon: Icons.local_laundry_service_outlined,
+                        label: "Last washed",
+                        value: item.lastWashed.replaceFirst("Washed ", ""),
+                      ),
+                      const SizedBox(height: 12),
+                      _InventoryInfoCard(
+                        icon: Icons.repeat_rounded,
+                        label: "Times worn",
+                        value: "${item.wears} times",
+                      ),
+                      const SizedBox(height: 12),
+                      _InventoryInfoCard(
+                        icon: Icons.wb_sunny_outlined,
+                        label: "Best season",
+                        value: item.season,
+                      ),
+                      const SizedBox(height: 20),
+                      const Text(
+                        "Notes",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textDark,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.78),
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.92),
+                          ),
+                        ),
+                        child: Text(
+                          item.notes,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: AppColors.textMuted,
+                            height: 1.45,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InventoryInfoCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _InventoryInfoCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: appBackground(),
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.78),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.92),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
         children: [
-          const Text(
-            "Upload",
-            style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textDark,
+          Container(
+            width: 42,
+            height: 42,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color(0xFFF6F3EE),
+            ),
+            child: Icon(
+              icon,
+              color: AppColors.primary,
+              size: 20,
             ),
           ),
-          const SizedBox(height: 8),
-          const Text(
-            "Demo view — camera + RFID intake will feed the digital closet.",
-            style: TextStyle(fontSize: 14, color: AppColors.textMuted),
-          ),
-          const SizedBox(height: 18),
-          _Card(
+          const SizedBox(width: 12),
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  "Add a clothing item (demo)",
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textDark,
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: AppColors.textMuted,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 10),
-                const Text(
-                  "In the final system, the closet camera captures an image and stores metadata like type, color, and wear history.",
-                  style: TextStyle(color: AppColors.textMuted),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 14.5,
+                    color: AppColors.textDark,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-                const SizedBox(height: 14),
-                _PillButton(
-                  label: "Simulate Camera Upload",
-                  leading: Icons.camera_alt_rounded,
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text("Demo: simulated camera upload"),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/// ---------- Weather detail page ----------
+class WeatherDetailPage extends StatefulWidget {
+  const WeatherDetailPage({super.key});
+
+  @override
+  State<WeatherDetailPage> createState() => _WeatherDetailPageState();
+}
+
+class _WeatherDetailPageState extends State<WeatherDetailPage> {
+  late Future<Map<String, dynamic>> weatherFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    weatherFuture = fetchHamiltonWeather();
+  }
+
+  Future<void> refreshWeather() async {
+    final refreshed = fetchHamiltonWeather();
+    setState(() {
+      weatherFuture = refreshed;
+    });
+    await refreshed;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Container(
+        decoration: appBackground(),
+        child: SafeArea(
+          bottom: false,
+          child: RefreshIndicator(
+            onRefresh: refreshWeather,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 32),
+              children: [
+                Row(
+                  children: [
+                    _ModernCircleButton(
+                      icon: Icons.arrow_back_rounded,
+                      onTap: () => Navigator.of(context).pop(),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        "Weather",
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textDark,
+                        ),
                       ),
-                    );
-                  },
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 10),
-                _PillButton(
-                  label: "Simulate RFID Scan",
-                  leading: Icons.nfc_rounded,
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text("Demo: simulated RFID scan"),
+                const SizedBox(height: 8),
+                const Text(
+                  "Current weather in Hamilton",
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: AppColors.textMuted,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                FutureBuilder<Map<String, dynamic>>(
+                  future: weatherFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const _Card(
+                        child: Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(20),
+                            child: CircularProgressIndicator(),
+                          ),
+                        ),
+                      );
+                    }
+
+                    if (snapshot.hasError) {
+                      return _Card(
+                        child: Column(
+                          children: [
+                            const Icon(
+                              Icons.error_outline,
+                              color: Colors.redAccent,
+                              size: 32,
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              'Could not load weather.\n${snapshot.error}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: AppColors.textMuted),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
+                    final current = snapshot.data!;
+                    final temp = (current['temperature_2m'] as num).toDouble();
+                    final humidity = current['relative_humidity_2m'];
+                    final wind = (current['wind_speed_10m'] as num).toDouble();
+                    final code = current['weather_code'] as int;
+                    final isDay = current['is_day'] as int;
+                    final time = current['time'] as String;
+
+                    return _Card(
+                      child: Column(
+                        children: [
+                          Icon(
+                            weatherIcon(code, isDay),
+                            size: 56,
+                            color: AppColors.primary,
+                          ),
+                          const SizedBox(height: 12),
+                          const Text(
+                            "Hamilton, ON",
+                            style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textDark,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '${temp.toStringAsFixed(1)}°C',
+                            style: const TextStyle(
+                              fontSize: 38,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textDark,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            weatherDescription(code),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: AppColors.textMuted,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          const Divider(),
+                          const SizedBox(height: 10),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            children: [
+                              _WeatherStat(
+                                icon: Icons.water_drop_outlined,
+                                label: 'Humidity',
+                                value: '$humidity%',
+                              ),
+                              _WeatherStat(
+                                icon: Icons.air,
+                                label: 'Wind',
+                                value: '${wind.toStringAsFixed(1)} km/h',
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Updated: $time',
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                        ],
                       ),
                     );
                   },
@@ -3091,7 +4051,710 @@ class UploadPage extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WeatherStat extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _WeatherStat({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Icon(icon, color: AppColors.primary),
+        const SizedBox(height: 6),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: AppColors.textMuted,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textDark,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// ---------- Upload ----------
+class UploadPage extends StatelessWidget {
+  const UploadPage({super.key});
+
+  void _showDemoMessage(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: appBackground(),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 104),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(36),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(36),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.white.withOpacity(0.84),
+                      Colors.white.withOpacity(0.72),
+                    ],
+                  ),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.88),
+                    width: 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.07),
+                      blurRadius: 30,
+                      offset: const Offset(0, 18),
+                    ),
+                  ],
+                ),
+                child: Stack(
+                  children: [
+                    const Positioned.fill(
+                      child: _UploadAmbientBackground(),
+                    ),
+                    ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                      children: [
+                        Row(
+                          children: [
+                            _ModernCircleButton(
+                              icon: Icons.info_outline_rounded,
+                              onTap: () {
+                                _showDemoMessage(
+                                  context,
+                                  "Demo upload tools for camera, RFID, and closet insights.",
+                                );
+                              },
+                            ),
+                            const Spacer(),
+                            _ModernCircleButton(
+                              icon: Icons.settings_outlined,
+                              onTap: () {
+                                _showDemoMessage(
+                                  context,
+                                  "Upload settings coming soon.",
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        const Center(
+                          child: Text(
+                            "Upload",
+                            style: TextStyle(
+                              fontSize: 26,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textDark,
+                              letterSpacing: -0.5,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        const Center(
+                          child: Text(
+                            "Add clothing to your digital closet.",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              color: AppColors.textMuted,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              flex: 6,
+                              child: Center(
+                                child: _UploadCircleAction(
+                                  onTap: () {
+                                    _showDemoMessage(
+                                      context,
+                                      "Demo: add item flow opened.",
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            const Expanded(
+                              flex: 4,
+                              child: _ClosetPreviewMini(),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+                        _UploadSectionCard(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                "Quick Actions",
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.textDark,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _UploadQuickActionCard(
+                                      icon: Icons.camera_alt_rounded,
+                                      iconBg: const Color(0xFFE3F3EE),
+                                      iconColor: AppColors.primary,
+                                      title: "Camera Capture",
+                                      subtitle: "Take photo\nof your item",
+                                      onTap: () {
+                                        _showDemoMessage(
+                                          context,
+                                          "Demo: simulated camera upload",
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: _UploadQuickActionCard(
+                                      icon: Icons.nfc_rounded,
+                                      iconBg: const Color(0xFFE8F4EC),
+                                      iconColor: const Color(0xFF4F9A6D),
+                                      title: "RFID Scan",
+                                      subtitle: "Scan your item's\nRFID tag",
+                                      onTap: () {
+                                        _showDemoMessage(
+                                          context,
+                                          "Demo: simulated RFID scan",
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: _UploadQuickActionCard(
+                                      icon: Icons.upload_rounded,
+                                      iconBg: const Color(0xFFEAF1EF),
+                                      iconColor: const Color(0xFF2C6A56),
+                                      title: "Bulk Upload",
+                                      subtitle: "Add multiple\nat once",
+                                      onTap: () {
+                                        _showDemoMessage(
+                                          context,
+                                          "Demo: bulk upload coming soon.",
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        _UploadSectionCard(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                "More Tools",
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.textDark,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              _UploadToolRow(
+                                icon: Icons.auto_awesome_outlined,
+                                iconBg: const Color(0xFFF2F7EE),
+                                iconColor: const Color(0xFF82A36C),
+                                title: "Style Suggestions",
+                                subtitle:
+                                    "Get outfit ideas with items from your closet",
+                                onTap: () {
+                                  _showDemoMessage(
+                                    context,
+                                    "Style suggestions feature coming soon.",
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 10),
+                              _UploadToolRow(
+                                icon: Icons.bar_chart_rounded,
+                                iconBg: const Color(0xFFEEF3FA),
+                                iconColor: const Color(0xFF5E89C7),
+                                title: "Wardrobe Insights",
+                                subtitle:
+                                    "See what you wear most and optimize your closet",
+                                onTap: () {
+                                  _showDemoMessage(
+                                    context,
+                                    "Wardrobe insights feature coming soon.",
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 10),
+                              _UploadToolRow(
+                                icon: Icons.favorite_border_rounded,
+                                iconBg: const Color(0xFFF8F2E8),
+                                iconColor: const Color(0xFFCAA15B),
+                                title: "Care Reminders",
+                                subtitle:
+                                    "Get reminders to wash or care for your items",
+                                onTap: () {
+                                  _showDemoMessage(
+                                    context,
+                                    "Care reminders feature coming soon.",
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UploadAmbientBackground extends StatelessWidget {
+  const _UploadAmbientBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Stack(
+        children: [
+          Positioned(
+            left: -70,
+            top: 120,
+            child: _AmbientShape(
+              width: 180,
+              height: 220,
+              color: const Color(0xFFDDE8E1).withOpacity(0.38),
+              radius: 110,
+            ),
+          ),
+          Positioned(
+            right: -40,
+            top: 110,
+            child: _AmbientShape(
+              width: 180,
+              height: 180,
+              color: const Color(0xFFECE7DF).withOpacity(0.55),
+              radius: 90,
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 70,
+            child: Center(
+              child: Container(
+                width: 210,
+                height: 210,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.18),
+                ),
+              ),
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _UploadCircleAction extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _UploadCircleAction({
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: Container(
+        width: 148,
+        height: 148,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white.withOpacity(0.88),
+          border: Border.all(
+            color: AppColors.primary.withOpacity(0.22),
+            width: 2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.primary.withOpacity(0.08),
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: const [
+            Icon(
+              Icons.add_a_photo_rounded,
+              size: 38,
+              color: AppColors.primary,
+            ),
+            SizedBox(height: 8),
+            Text(
+              "Add Item",
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: AppColors.primary,
+              ),
+            ),
+            SizedBox(height: 6),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 18),
+              child: Text(
+                "Tap to capture or upload a clothing item",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1.25,
+                  color: AppColors.textMuted,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ClosetPreviewMini extends StatelessWidget {
+  const _ClosetPreviewMini();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 138,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(26),
+        color: Colors.white.withOpacity(0.42),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.65),
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            left: 18,
+            right: 18,
+            top: 24,
+            child: Container(
+              height: 4,
+              decoration: BoxDecoration(
+                color: const Color(0xFFD2CBC2),
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 20,
+            right: 20,
+            top: 34,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: const [
+                _MiniHangingGarment(color: Color(0xFFE9E2D6)),
+                _MiniHangingGarment(color: Color(0xFFD7D0C6)),
+                _MiniHangingGarment(color: Color(0xFFC9B7A3)),
+              ],
+            ),
+          ),
+          Positioned(
+            right: 8,
+            bottom: 8,
+            child: Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withOpacity(0.68),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniHangingGarment extends StatelessWidget {
+  final Color color;
+
+  const _MiniHangingGarment({
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 28,
+      child: Column(
+        children: [
+          Container(
+            width: 2,
+            height: 10,
+            color: const Color(0xFFB6AEA3),
+          ),
+          const Icon(
+            Icons.checkroom_outlined,
+            size: 16,
+            color: Color(0xFFB1AAA0),
+          ),
+          Transform.translate(
+            offset: const Offset(0, -3),
+            child: CustomPaint(
+              size: const Size(24, 26),
+              painter: _MiniTopPainter(color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UploadSectionCard extends StatelessWidget {
+  final Widget child;
+
+  const _UploadSectionCard({
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.80),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.95),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _UploadQuickActionCard extends StatelessWidget {
+  final IconData icon;
+  final Color iconBg;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _UploadQuickActionCard({
+    required this.icon,
+    required this.iconBg,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 12, 10, 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF9F7F3),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: Colors.white,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: iconBg,
+              ),
+              child: Icon(
+                icon,
+                size: 16,
+                color: iconColor,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textDark,
+                height: 1.15,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: const TextStyle(
+                fontSize: 10.2,
+                height: 1.2,
+                color: AppColors.textMuted,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _UploadToolRow extends StatelessWidget {
+  final IconData icon;
+  final Color iconBg;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _UploadToolRow({
+    required this.icon,
+    required this.iconBg,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFBF9F5),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: Colors.white,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: iconBg,
+              ),
+              child: Icon(
+                icon,
+                size: 18,
+                color: iconColor,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textDark,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: AppColors.textMuted,
+                      fontWeight: FontWeight.w500,
+                      height: 1.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: Colors.black.withOpacity(0.35),
+            ),
+          ],
+        ),
       ),
     );
   }
