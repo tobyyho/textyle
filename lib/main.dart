@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
-
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 void main() {
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
@@ -1251,6 +1252,7 @@ class _MainScaffoldState extends State<MainScaffold> {
     InventoryPage(),
     HomePage(),
     UploadPage(),
+    WeatherPage(),
   ];
 
   @override
@@ -1413,6 +1415,12 @@ class _MainScaffoldState extends State<MainScaffold> {
                               icon: Icons.add_box_rounded,
                               selected: index == 2,
                               onTap: () => _goToPage(2),
+                            ),
+                          _NavItem(
+                              label: "Weather",
+                              icon: Icons.cloud_outlined,
+                              selected: index == 3,
+                              onTap: () => _goToPage(3),
                             ),
                           ],
                         ),
@@ -2730,6 +2738,286 @@ class _InventoryTile extends StatelessWidget {
           const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted),
         ],
       ),
+    );
+  }
+}
+
+class WeatherPage extends StatefulWidget {
+  const WeatherPage({super.key});
+
+  @override
+  State<WeatherPage> createState() => _WeatherPageState();
+}
+
+class _WeatherPageState extends State<WeatherPage> {
+  late Future<Map<String, dynamic>> weatherFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    weatherFuture = fetchHamiltonWeather();
+  }
+
+  Future<Map<String, dynamic>> fetchHamiltonWeather() async {
+    const latitude = 43.2557;
+    const longitude = -79.8711;
+
+    final uri = Uri.parse(
+      'https://api.open-meteo.com/v1/forecast'
+      '?latitude=$latitude'
+      '&longitude=$longitude'
+      '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code,is_day'
+      '&timezone=auto',
+    );
+
+    final response = await http.get(uri);
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to load weather');
+    }
+
+    final data = jsonDecode(response.body);
+    return data['current'];
+  }
+
+  String weatherDescription(int code) {
+    switch (code) {
+      case 0:
+        return 'Clear sky';
+      case 1:
+        return 'Mainly clear';
+      case 2:
+        return 'Partly cloudy';
+      case 3:
+        return 'Overcast';
+      case 45:
+      case 48:
+        return 'Fog';
+      case 51:
+      case 53:
+      case 55:
+        return 'Drizzle';
+      case 61:
+      case 63:
+      case 65:
+        return 'Rain';
+      case 71:
+      case 73:
+      case 75:
+        return 'Snow';
+      case 80:
+      case 81:
+      case 82:
+        return 'Rain showers';
+      case 95:
+        return 'Thunderstorm';
+      default:
+        return 'Unknown';
+    }
+  }
+
+  IconData weatherIcon(int code, int isDay) {
+    if (code == 0) {
+      return isDay == 1 ? Icons.wb_sunny_rounded : Icons.nightlight_round;
+    } else if (code >= 1 && code <= 3) {
+      return Icons.cloud_rounded;
+    } else if (code == 45 || code == 48) {
+      return Icons.foggy;
+    } else if ((code >= 51 && code <= 55) || (code >= 61 && code <= 65) || (code >= 80 && code <= 82)) {
+      return Icons.grain;
+    } else if (code >= 71 && code <= 75) {
+      return Icons.ac_unit;
+    } else if (code == 95) {
+      return Icons.thunderstorm;
+    } else {
+      return Icons.cloud_outlined;
+    }
+  }
+
+  Future<void> refreshWeather() async {
+    setState(() {
+      weatherFuture = fetchHamiltonWeather();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: appBackground(),
+      child: SafeArea(
+        bottom: false,
+        child: RefreshIndicator(
+          onRefresh: refreshWeather,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(18, 20, 18, 110),
+            children: [
+              const Text(
+                "Weather",
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textDark,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                "Current weather in Hamilton",
+                style: TextStyle(
+                  fontSize: 14,
+                  color: AppColors.textMuted,
+                ),
+              ),
+              const SizedBox(height: 18),
+              FutureBuilder<Map<String, dynamic>>(
+                future: weatherFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const _Card(
+                      child: Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(20),
+                          child: CircularProgressIndicator(),
+                        ),
+                      ),
+                    );
+                  }
+
+                  if (snapshot.hasError) {
+                    return _Card(
+                      child: Column(
+                        children: [
+                          const Icon(
+                            Icons.error_outline,
+                            color: Colors.redAccent,
+                            size: 32,
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            'Could not load weather.\n${snapshot.error}',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: AppColors.textMuted),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  final current = snapshot.data!;
+                  final temp = (current['temperature_2m'] as num).toDouble();
+                  final humidity = current['relative_humidity_2m'];
+                  final wind = (current['wind_speed_10m'] as num).toDouble();
+                  final code = current['weather_code'] as int;
+                  final isDay = current['is_day'] as int;
+                  final time = current['time'] as String;
+
+                  return _Card(
+                    child: Column(
+                      children: [
+                        Icon(
+                          weatherIcon(code, isDay),
+                          size: 56,
+                          color: AppColors.primary,
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          "Hamilton, ON",
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textDark,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${temp.toStringAsFixed(1)}°C',
+                          style: const TextStyle(
+                            fontSize: 38,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textDark,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          weatherDescription(code),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            color: AppColors.textMuted,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        const Divider(),
+                        const SizedBox(height: 10),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            _WeatherStat(
+                              icon: Icons.water_drop_outlined,
+                              label: 'Humidity',
+                              value: '$humidity%',
+                            ),
+                            _WeatherStat(
+                              icon: Icons.air,
+                              label: 'Wind',
+                              value: '${wind.toStringAsFixed(1)} km/h',
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Updated: $time',
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WeatherStat extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _WeatherStat({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Icon(icon, color: AppColors.primary),
+        const SizedBox(height: 6),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: AppColors.textMuted,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textDark,
+          ),
+        ),
+      ],
     );
   }
 }
