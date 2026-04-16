@@ -1,29 +1,33 @@
-name: textyle_app
-description: "A new Flutter project."
+name: textyle_visual_build
+description: Textyle visual prototype build from uploaded main.dart
 publish_to: 'none'
 
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.11.0
+  sdk: ">=3.3.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  http: ^1.6.0
-
-  cupertino_icons: ^1.0.8
-  model_viewer_plus: ^1.10.0
-  http: ^1.6.0
-
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-
-  flutter_lints: ^6.0.0
+  http: ^1.2.1
+  image_picker: ^1.2.1
+  provider: ^6.1.5+1
 
 flutter:
   uses-material-design: true
-
   assets:
     - assets/textyle_logo.png
+  fonts:
+  - family: Inter
+    fonts:
+      - asset: assets/fonts/Inter.ttc
+      - asset: assets/fonts/Inter-Medium.ttf
+        weight: 500
+      - asset: assets/fonts/Inter-SemiBold.ttf
+        weight: 600
+      - asset: assets/fonts/Inter-Bold.ttf
+        weight: 700
+      - asset: assets/fonts/Inter-ExtraBold.ttf
+        weight: 800
+  
