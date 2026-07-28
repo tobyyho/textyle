@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+  />
+  <style>
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      outline: none;
+      background: transparent;
+    }
+
+    #status {
+      position: fixed;
+      right: 10px;
+      bottom: 10px;
+      left: 10px;
+      display: none;
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.92);
+      color: #1d2228;
+      font: 700 12px/1.3 system-ui, sans-serif;
+      white-space: pre-wrap;
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);
+    }
+  </style>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="status"></div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    const params = new URLSearchParams(window.location.search);
+    const initialAvatarUrl = params.get('avatar') || '';
+    const initialTopUrl = params.get('top') || '';
+    const initialBottomUrl = params.get('bottom') || '';
+
+    const ROTATION_SENSITIVITY = 0.012;
+    const WORLD_VIEW_ZOOM = 1.3;
+
+    const statusElement = document.getElementById('status');
+    const loader = new GLTFLoader();
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(
+      18,
+      window.innerWidth / window.innerHeight,
+      0.01,
+      500,
+    );
+
+    camera.zoom = WORLD_VIEW_ZOOM;
+    camera.updateProjectionMatrix();
+
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance',
+    });
+
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.setClearColor(0x000000, 0);
+    document.body.appendChild(renderer.domElement);
+
+    const sceneGroup = new THREE.Group();
+    const avatarGroup = new THREE.Group();
+    const bottomGroup = new THREE.Group();
+    const topGroup = new THREE.Group();
+
+    sceneGroup.add(avatarGroup, bottomGroup, topGroup);
+    scene.add(sceneGroup);
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xb8c7d9, 2.6));
+
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.7);
+    keyLight.position.set(3, 5, 6);
+    scene.add(keyLight);
+
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.85);
+    fillLight.position.set(-4, 2, 3);
+    scene.add(fillLight);
+
+    let currentAvatarUrl = initialAvatarUrl;
+    let currentTopUrl = initialTopUrl;
+    let currentBottomUrl = initialBottomUrl;
+
+    let avatarLoadToken = 0;
+    let topLoadToken = 0;
+    let bottomLoadToken = 0;
+    let cameraHasBeenFramed = false;
+
+    function showStatus(message) {
+      statusElement.textContent = message;
+      statusElement.style.display = 'block';
+      console.warn(message);
+    }
+
+    function hideStatus() {
+      statusElement.style.display = 'none';
+    }
+
+    function unique(values) {
+      return [...new Set(values.filter(Boolean))];
+    }
+
+    function candidateUrls(url) {
+      if (!url) return [];
+
+      const decoded = decodeURIComponent(url);
+      const withoutLeadingSlash = decoded.replace(/^\//, '');
+      const candidates = [decoded, `/${withoutLeadingSlash}`];
+
+      if (withoutLeadingSlash.startsWith('assets/')) {
+        candidates.push(`/assets/${withoutLeadingSlash}`);
+      }
+
+      if (withoutLeadingSlash.startsWith('assets/assets/')) {
+        candidates.push(`/${withoutLeadingSlash.replace(/^assets\//, '')}`);
+      }
+
+      return unique(candidates);
+    }
+
+    function loadUrl(url) {
+      return new Promise((resolve, reject) => {
+        loader.load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+      });
+    }
+
+    async function loadModel(label, url, required = false) {
+      if (!url) return null;
+
+      const candidates = candidateUrls(url);
+      let lastError = null;
+
+      for (const candidate of candidates) {
+        try {
+          return await loadUrl(candidate);
+        } catch (error) {
+          lastError = error;
+          console.warn(`${label} failed to load from ${candidate}`, error);
+        }
+      }
+
+      if (required) {
+        showStatus(
+          `${label} failed to load.\n\nTried:\n${candidates.join('\n')}\n\n` +
+          'Check the filename, folder, and pubspec.yaml.',
+        );
+      }
+
+      throw lastError ?? new Error(`${label} failed to load.`);
+    }
+
+    function prepareModel(model) {
+      // Do not resize, reposition, or rotate the exported model.
+      // Every avatar-specific garment is expected to already fit at export.
+      model.traverse((child) => {
+        if (!child.isMesh) return;
+
+        child.frustumCulled = false;
+        const materials = Array.isArray(child.material)
+          ? child.material
+          : [child.material];
+
+        for (const material of materials) {
+          if (!material) continue;
+          material.side = THREE.DoubleSide;
+          material.needsUpdate = true;
+        }
+      });
+
+      model.updateMatrixWorld(true);
+      return model;
+    }
+
+    function boundsOf(object) {
+      object.updateMatrixWorld(true);
+
+      const box = new THREE.Box3().setFromObject(object);
+      const center = new THREE.Vector3();
+      const size = new THREE.Vector3();
+
+      box.getCenter(center);
+      box.getSize(size);
+      return { box, center, size };
+    }
+
+    function clearGroup(group) {
+      while (group.children.length > 0) {
+        group.remove(group.children[0]);
+      }
+    }
+
+    function frameSceneOnce() {
+      if (cameraHasBeenFramed) return;
+
+      const bounds = boundsOf(sceneGroup);
+      if (bounds.box.isEmpty()) return;
+
+      const maxSize = Math.max(bounds.size.x, bounds.size.y, bounds.size.z);
+      const fov = THREE.MathUtils.degToRad(camera.fov);
+      const distance = Math.abs(maxSize / Math.sin(fov / 2)) * 0.88;
+
+      camera.position.set(
+        bounds.center.x,
+        bounds.center.y,
+        bounds.center.z + distance,
+      );
+      camera.near = Math.max(distance / 100, 0.01);
+      camera.far = Math.max(distance * 100, 100);
+      camera.lookAt(bounds.center);
+      camera.zoom = WORLD_VIEW_ZOOM;
+      camera.updateProjectionMatrix();
+
+      cameraHasBeenFramed = true;
+    }
+
+    async function replaceAvatar(url) {
+      const nextUrl = url || '';
+      currentAvatarUrl = nextUrl;
+      const token = ++avatarLoadToken;
+
+      if (!nextUrl) {
+        clearGroup(avatarGroup);
+        return;
+      }
+
+      try {
+        const avatar = prepareModel(await loadModel('Avatar', nextUrl, true));
+        if (token !== avatarLoadToken || nextUrl !== currentAvatarUrl) return;
+
+        clearGroup(avatarGroup);
+        avatarGroup.add(avatar);
+        hideStatus();
+      } catch (error) {
+        if (token !== avatarLoadToken) return;
+        console.error(error);
+      }
+    }
+
+    async function replaceTop(url) {
+      const nextUrl = url || '';
+      currentTopUrl = nextUrl;
+      const token = ++topLoadToken;
+
+      if (!nextUrl) {
+        clearGroup(topGroup);
+        return;
+      }
+
+      try {
+        const top = prepareModel(await loadModel('Top', nextUrl));
+        if (token !== topLoadToken || nextUrl !== currentTopUrl) return;
+
+        // Keep the old top visible until the new body-specific top is ready.
+        clearGroup(topGroup);
+        topGroup.add(top);
+        hideStatus();
+      } catch (error) {
+        if (token !== topLoadToken) return;
+        console.error(error);
+        showStatus(`The selected top could not be loaded:\n${nextUrl}`);
+      }
+    }
+
+    async function replaceBottom(url) {
+      const nextUrl = url || '';
+      currentBottomUrl = nextUrl;
+      const token = ++bottomLoadToken;
+
+      if (!nextUrl) {
+        clearGroup(bottomGroup);
+        return;
+      }
+
+      try {
+        const bottom = prepareModel(await loadModel('Bottom', nextUrl));
+        if (token !== bottomLoadToken || nextUrl !== currentBottomUrl) return;
+
+        // Keep the old bottom visible until the new body-specific bottom is ready.
+        clearGroup(bottomGroup);
+        bottomGroup.add(bottom);
+        hideStatus();
+      } catch (error) {
+        if (token !== bottomLoadToken) return;
+        console.error(error);
+        showStatus(`The selected bottom could not be loaded:\n${nextUrl}`);
+      }
+    }
+
+    async function replaceBodyOutfit(avatarUrl, topUrl, bottomUrl) {
+      const nextAvatarUrl = avatarUrl || '';
+      const nextTopUrl = topUrl || '';
+      const nextBottomUrl = bottomUrl || '';
+
+      currentAvatarUrl = nextAvatarUrl;
+      currentTopUrl = nextTopUrl;
+      currentBottomUrl = nextBottomUrl;
+
+      const avatarToken = ++avatarLoadToken;
+      const topToken = ++topLoadToken;
+      const bottomToken = ++bottomLoadToken;
+
+      try {
+        const [avatarResult, topResult, bottomResult] = await Promise.allSettled([
+          nextAvatarUrl
+            ? loadModel('Avatar', nextAvatarUrl, true)
+            : Promise.resolve(null),
+          nextTopUrl
+            ? loadModel('Top', nextTopUrl)
+            : Promise.resolve(null),
+          nextBottomUrl
+            ? loadModel('Bottom', nextBottomUrl)
+            : Promise.resolve(null),
+        ]);
+
+        if (
+          avatarToken !== avatarLoadToken ||
+          topToken !== topLoadToken ||
+          bottomToken !== bottomLoadToken ||
+          nextAvatarUrl !== currentAvatarUrl ||
+          nextTopUrl !== currentTopUrl ||
+          nextBottomUrl !== currentBottomUrl
+        ) {
+          return;
+        }
+
+        if (avatarResult.status === 'rejected') {
+          throw avatarResult.reason;
+        }
+
+        const nextAvatar = avatarResult.value
+          ? prepareModel(avatarResult.value)
+          : null;
+        const nextTop =
+          topResult.status === 'fulfilled' && topResult.value
+            ? prepareModel(topResult.value)
+            : null;
+        const nextBottom =
+          bottomResult.status === 'fulfilled' && bottomResult.value
+            ? prepareModel(bottomResult.value)
+            : null;
+
+        // Swap the avatar and its matching body-specific garments together.
+        // No scaling, positioning, or runtime fitting is performed.
+        clearGroup(avatarGroup);
+        clearGroup(topGroup);
+        clearGroup(bottomGroup);
+
+        if (nextAvatar) avatarGroup.add(nextAvatar);
+        if (nextTop) topGroup.add(nextTop);
+        if (nextBottom) bottomGroup.add(nextBottom);
+
+        if (!cameraHasBeenFramed) {
+          frameSceneOnce();
+        }
+
+        const clothingFailed =
+          topResult.status === 'rejected' ||
+          bottomResult.status === 'rejected';
+
+        if (clothingFailed) {
+          showStatus(
+            'The avatar loaded, but one or more matching clothing models could not be loaded.',
+          );
+        } else {
+          hideStatus();
+        }
+      } catch (error) {
+        if (avatarToken !== avatarLoadToken) return;
+        console.error(error);
+        showStatus('The selected avatar could not be loaded.');
+      }
+    }
+
+    async function loadInitialScene() {
+      if (!initialAvatarUrl) {
+        showStatus('No avatar was provided to outfit_viewer.html.');
+        return;
+      }
+
+      await replaceBodyOutfit(
+        initialAvatarUrl,
+        initialTopUrl,
+        initialBottomUrl,
+      );
+    }
+
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+
+      if (data.type === 'textyle-set-body-outfit') {
+        replaceBodyOutfit(
+          String(data.avatar || ''),
+          String(data.top || ''),
+          String(data.bottom || ''),
+        );
+        return;
+      }
+
+      if (data.type === 'textyle-rotate-avatar') {
+        sceneGroup.rotation.y +=
+          Number(data.deltaX || 0) * ROTATION_SENSITIVITY;
+      }
+
+      if (data.type === 'textyle-set-avatar') {
+        replaceAvatar(String(data.avatar || ''));
+      }
+
+      if (data.type === 'textyle-set-top') {
+        replaceTop(String(data.asset || ''));
+      }
+
+      if (data.type === 'textyle-set-bottom') {
+        replaceBottom(String(data.asset || ''));
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.zoom = WORLD_VIEW_ZOOM;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+
+    loadInitialScene();
+    animate();
+  </script>
+</body>
+</html>
