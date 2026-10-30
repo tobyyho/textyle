@@ -1,15 +1,21 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+
 import 'clothing_item.dart';
 
 class InventoryStore extends ChangeNotifier {
-  final List<ClothingItem> _items = [
-    const ClothingItem(
+  final List<ClothingItem> _items;
+
+  InventoryStore({Iterable<ClothingItem>? seedItems})
+      : _items = List<ClothingItem>.from(seedItems ?? _demoItems);
+
+  static const List<ClothingItem> _demoItems = [
+    ClothingItem(
       id: 'demo_top_1',
       type: ClothingType.top,
       name: 'Cream Tee',
       colorLabel: 'Cream',
     ),
-    const ClothingItem(
+    ClothingItem(
       id: 'demo_bottom_1',
       type: ClothingType.bottom,
       name: 'Black Pants',
@@ -21,20 +27,30 @@ class InventoryStore extends ChangeNotifier {
   String? _selectedBottomId = 'demo_bottom_1';
 
   List<ClothingItem> get items => List.unmodifiable(_items);
+  int get itemCount => _items.length;
 
   List<ClothingItem> get tops =>
-      _items.where((item) => item.type == ClothingType.top).toList();
+      _items.where((item) => item.type == ClothingType.top).toList(growable: false);
 
   List<ClothingItem> get bottoms =>
-      _items.where((item) => item.type == ClothingType.bottom).toList();
+      _items.where((item) => item.type == ClothingType.bottom).toList(growable: false);
 
   List<ClothingItem> get accessories =>
-      _items.where((item) => item.type == ClothingType.accessory).toList();
+      _items.where((item) => item.type == ClothingType.accessory).toList(growable: false);
 
-  ClothingItem? get selectedTop => _findById(_selectedTopId);
-  ClothingItem? get selectedBottom => _findById(_selectedBottomId);
+  ClothingItem? get selectedTop => itemById(_selectedTopId);
+  ClothingItem? get selectedBottom => itemById(_selectedBottomId);
+
+  ClothingItem? itemById(String? id) {
+    if (id == null) return null;
+    for (final item in _items) {
+      if (item.id == id) return item;
+    }
+    return null;
+  }
 
   void addItem(ClothingItem item) {
+    if (itemById(item.id) != null) return;
     _items.add(item);
     notifyListeners();
   }
@@ -47,6 +63,7 @@ class InventoryStore extends ChangeNotifier {
   }
 
   void selectItem(ClothingItem item) {
+    if (itemById(item.id) == null) return;
     switch (item.type) {
       case ClothingType.top:
         _selectedTopId = item.id;
@@ -55,17 +72,25 @@ class InventoryStore extends ChangeNotifier {
         _selectedBottomId = item.id;
         break;
       case ClothingType.accessory:
-        break;
+        return;
     }
     notifyListeners();
   }
 
-  ClothingItem? _findById(String? id) {
-    if (id == null) return null;
-    try {
-      return _items.firstWhere((item) => item.id == id);
-    } catch (_) {
-      return null;
-    }
+  void removeItem(String id) {
+    final previousCount = _items.length;
+    _items.removeWhere((item) => item.id == id);
+    if (_items.length == previousCount) return;
+    if (_selectedTopId == id) _selectedTopId = null;
+    if (_selectedBottomId == id) _selectedBottomId = null;
+    notifyListeners();
+  }
+
+  void clear() {
+    if (_items.isEmpty) return;
+    _items.clear();
+    _selectedTopId = null;
+    _selectedBottomId = null;
+    notifyListeners();
   }
 }

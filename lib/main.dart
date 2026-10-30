@@ -1,15 +1,17 @@
 import 'dart:async';
-import 'dart:ui';
+import 'dart:convert';
 import 'dart:html' as html;
+import 'dart:ui';
 import 'dart:ui_web' as ui_web;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
-import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+
 import 'models/clothing_item.dart';
 import 'models/inventory_store.dart';
-import 'package:image_picker/image_picker.dart';
 
 void main() {
   FlutterError.onError = (FlutterErrorDetails details) {
@@ -19,14 +21,14 @@ void main() {
   };
 
   runApp(
-  MultiProvider(
-    providers: [
-      ChangeNotifierProvider(create: (_) => InventoryStore()),
-      ChangeNotifierProvider(create: (_) => AvatarSettings()),
-    ],
-    child: const TextyleApp(),
-  ),
-);
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => InventoryStore()),
+        ChangeNotifierProvider(create: (_) => AvatarSettings()),
+      ],
+      child: const TextyleApp(),
+    ),
+  );
 }
 
 class TextyleApp extends StatelessWidget {
@@ -66,11 +68,8 @@ class AppColors {
   static const bg = Color(0xFFF4F7FA);
   static const bgSoft = Color(0xFFF8FBFF);
   static const surface = Colors.white;
-  static const surfaceSoft = Color(0xFFF7FAFD);
 
   static const primary = Color(0xFF0A8B79);
-  static const primaryDark = Color(0xFF075F52);
-  static const secondary = Color(0xFF234E7E);
 
   static const textDark = Color(0xFF1D2228);
   static const textMuted = Color(0xFF7D838A);
@@ -81,7 +80,6 @@ class AppColors {
   static const connector = Color(0xFFB2ACA3);
   static const shadow = Color(0x14000000);
 
-  static const fieldFill = Colors.white;
 }
 
 enum AvatarBodyType {
@@ -248,7 +246,7 @@ Future<Map<String, dynamic>> fetchHamiltonWeatherForecast() async {
     '&longitude=$_hamiltonLongitude'
     '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code,is_day'
     '&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m'
-    '&forecast_days=1'
+    '&forecast_days=2'
     '&timezone=auto',
   );
 
@@ -260,42 +258,6 @@ Future<Map<String, dynamic>> fetchHamiltonWeatherForecast() async {
 
   final data = jsonDecode(response.body) as Map<String, dynamic>;
   return data;
-}
-
-/// ---------- One page at a time physics ----------
-class OnePageAtATimeScrollPhysics extends PageScrollPhysics {
-  const OnePageAtATimeScrollPhysics({super.parent});
-
-  @override
-  OnePageAtATimeScrollPhysics applyTo(ScrollPhysics? ancestor) {
-    return OnePageAtATimeScrollPhysics(parent: buildParent(ancestor));
-  }
-
-  @override
-  double getTargetPixels(
-    ScrollMetrics position,
-    Tolerance tolerance,
-    double velocity,
-  ) {
-    final double page = position.pixels / position.viewportDimension;
-    final double currentPage = page.roundToDouble();
-    double targetPage = currentPage;
-
-    if (velocity > tolerance.velocity) {
-      targetPage = currentPage + 1;
-    } else if (velocity < -tolerance.velocity) {
-      targetPage = currentPage - 1;
-    } else {
-      final deltaFromRounded = page - currentPage;
-      if (deltaFromRounded > 0.15) {
-        targetPage = currentPage + 1;
-      } else if (deltaFromRounded < -0.15) {
-        targetPage = currentPage - 1;
-      }
-    }
-
-    return targetPage * position.viewportDimension;
-  }
 }
 
 /// ---------- Auth page ----------
@@ -311,13 +273,14 @@ class _AuthPageState extends State<AuthPage> {
   bool showPassword = false;
   bool rememberMe = true;
   bool showAuthContent = false;
+  bool _isSigningIn = false;
+  bool _signedIn = false;
   AvatarBodyType signUpBodyType = AvatarBodyType.male;
 
   final nameController = TextEditingController();
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
 
-  final _formScrollController = ScrollController();
 
   final GlobalKey<_ClosetHeroHeaderState> _heroKey =
       GlobalKey<_ClosetHeroHeaderState>();
@@ -329,16 +292,33 @@ class _AuthPageState extends State<AuthPage> {
     });
   }
 
-  void _goToMainApp() {
+  Future<void> _goToMainApp() async {
+    if (_isSigningIn) return;
+
     FocusScope.of(context).unfocus();
 
     if (isSignUp) {
       context.read<AvatarSettings>().setBodyType(signUpBodyType);
     }
 
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const MainScaffold()),
-    );
+    setState(() {
+      _isSigningIn = true;
+    });
+
+    // Keep the existing clothing-rack loading animation.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _heroKey.currentState?.startContinuousLoadingScroll();
+      }
+    });
+
+    await Future.delayed(const Duration(seconds: 5));
+    if (!mounted) return;
+
+    // Build exactly one screen: never mount Home beneath the auth page.
+    setState(() {
+      _signedIn = true;
+    });
   }
 
   void _switchToSignUp() {
@@ -379,7 +359,7 @@ class _AuthPageState extends State<AuthPage> {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(32),
             child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
               child: Container(
                 key: const ValueKey('login-card'),
                 padding: const EdgeInsets.fromLTRB(15, 15, 15, 15),
@@ -547,7 +527,7 @@ class _AuthPageState extends State<AuthPage> {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(32),
             child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
               child: Container(
                 key: const ValueKey('signup-card'),
                 padding: const EdgeInsets.fromLTRB(15, 15, 15, 15),
@@ -772,7 +752,7 @@ Widget _buildAuthButton() {
               borderRadius: BorderRadius.circular(25),
             ),
           ),
-          onPressed: _goToMainApp,
+          onPressed: _isSigningIn ? null : _goToMainApp,
           child: Text(
             isSignUp ? "Create Account" : "Sign In",
             style: const TextStyle(
@@ -790,11 +770,13 @@ Widget _buildAuthButton() {
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeOut,
-      opacity: showAuthContent ? 1 : 0,
+      opacity: showAuthContent && !_isSigningIn ? 1 : 0,
       child: AnimatedSlide(
-        duration: const Duration(milliseconds: 280),
+        duration: const Duration(milliseconds: 360),
         curve: Curves.easeOutCubic,
-        offset: showAuthContent ? Offset.zero : const Offset(0, 0.05),
+        offset: showAuthContent && !_isSigningIn
+            ? Offset.zero
+            : const Offset(0, 0.05),
         child: IgnorePointer(
           ignoring: !showAuthContent,
           child: Center(
@@ -834,16 +816,20 @@ Widget _buildAuthButton() {
   }
 
   Widget _buildAuthSection() {
+    final visible = showAuthContent && !_isSigningIn;
+
     return AnimatedOpacity(
-      duration: const Duration(milliseconds: 280),
-      curve: Curves.easeOut,
-      opacity: showAuthContent ? 1 : 0,
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeInOutCubic,
+      opacity: visible ? 1 : 0,
       child: AnimatedSlide(
-        duration: const Duration(milliseconds: 280),
-        curve: Curves.easeOutCubic,
-        offset: showAuthContent ? Offset.zero : const Offset(0, 0.05),
+        duration: const Duration(milliseconds: 520),
+        curve: Curves.easeInCubic,
+        offset: _isSigningIn
+            ? const Offset(0, 1.55)
+            : (showAuthContent ? Offset.zero : const Offset(0, 0.05)),
         child: IgnorePointer(
-          ignoring: !showAuthContent,
+          ignoring: !visible,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -902,72 +888,144 @@ Widget _buildAuthButton() {
     );
   }
 
+  Widget _buildLoadingContent() {
+    return IgnorePointer(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 18),
+          const Text(
+            'preparing your wardrobe',
+            style: TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.2,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: 120,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(99),
+              child: const LinearProgressIndicator(
+                minHeight: 3,
+                backgroundColor: Color(0x1A0A8B79),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  AppColors.primary,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     nameController.dispose();
     emailController.dispose();
     passwordController.dispose();
-    _formScrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_signedIn) {
+      return const MainScaffold();
+    }
+
     final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
 
-    return GestureDetector(
-      onTap: () => FocusScope.of(context).unfocus(),
-      child: Scaffold(
-        resizeToAvoidBottomInset: true,
-        body: Container(
-          decoration: appBackground(),
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final isShort = constraints.maxHeight < 760;
-                  final isVeryShort = constraints.maxHeight < 690;
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+                  onTap: () => FocusScope.of(context).unfocus(),
+                  child: Scaffold(
+                    resizeToAvoidBottomInset: true,
+                    body: Container(
+                      decoration: appBackground(),
+                      child: SafeArea(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 12,
+                          ),
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final isVeryShort = constraints.maxHeight < 690;
 
-                  final topGap = isVeryShort ? 6.0 : 14.0;
-                  final rackGap = isVeryShort ? 6.0 : 10.0;
-                  final brandGap = isVeryShort ? 10.0 : 14.0;
-                  final cardGap = isVeryShort ? 10.0 : 16.0;
+                              final topGap = isVeryShort ? 6.0 : 14.0;
+                              final rackGap = isVeryShort ? 6.0 : 10.0;
+                              final brandGap = isVeryShort ? 10.0 : 14.0;
+                              final cardGap = isVeryShort ? 10.0 : 16.0;
 
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SizedBox(height: topGap),
-                      ClosetHeroHeader(
-                        key: _heroKey,
-                        onIntroComplete: _handleRackIntroComplete,
-                      ),
-                      SizedBox(height: rackGap),
-                      _buildBrandBlock(),
-                      SizedBox(height: brandGap),
-                      Expanded(
-                        child: SingleChildScrollView(
-                          keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.onDrag,
-                          physics: const BouncingScrollPhysics(),
-                          padding: EdgeInsets.only(bottom: keyboardInset + 12),
-                          child: Column(
-                            children: [
-                              SizedBox(height: cardGap),
-                              _buildAuthSection(),
-                              const SizedBox(height: 12),
-                            ],
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  SizedBox(height: topGap),
+
+                                  // SAME rack before, during, and after pressing
+                                  // Sign In. It is never rebuilt as a different
+                                  // loading-rack widget.
+                                  ClosetHeroHeader(
+                                    key: _heroKey,
+                                    onIntroComplete:
+                                        _handleRackIntroComplete,
+                                  ),
+
+                                  SizedBox(height: rackGap),
+
+                                  _buildBrandBlock(),
+
+                                  SizedBox(height: brandGap),
+
+                                  Expanded(
+                                    child: SingleChildScrollView(
+                                      keyboardDismissBehavior:
+                                          ScrollViewKeyboardDismissBehavior
+                                              .onDrag,
+                                      physics:
+                                          const BouncingScrollPhysics(),
+                                      padding: EdgeInsets.only(
+                                        bottom: keyboardInset + 12,
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          SizedBox(height: cardGap),
+
+                                          AnimatedSwitcher(
+                                            duration: const Duration(
+                                              milliseconds: 280,
+                                            ),
+                                            switchInCurve:
+                                                Curves.easeOutCubic,
+                                            switchOutCurve:
+                                                Curves.easeInCubic,
+                                            child: _isSigningIn
+                                                ? _buildLoadingContent()
+                                                : _buildAuthSection(),
+                                          ),
+
+                                          const SizedBox(height: 12),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
                           ),
                         ),
                       ),
-                    ],
-                  );
-                },
-              ),
-            ),
+                    ),
+                  ),
           ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -1040,7 +1098,7 @@ class ClosetHeroHeader extends StatefulWidget {
 class _ClosetHeroHeaderState extends State<ClosetHeroHeader>
     with SingleTickerProviderStateMixin {
   static const double _itemExtent = 68.0;
-  static const int _virtualItemCount = 50000;
+  static const int _virtualItemCount = 6000;
   static const int _centerIndex = _virtualItemCount ~/ 2;
   static const Duration _introDuration = Duration(milliseconds: 2200);
 
@@ -1081,6 +1139,32 @@ class _ClosetHeroHeaderState extends State<ClosetHeroHeader>
 
   void spinCounterClockwise() {
     _queueSpin(4.2);
+  }
+
+  void startContinuousLoadingScroll() {
+    if (!mounted) return;
+
+    if (!_scrollController.hasClients) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) startContinuousLoadingScroll();
+      });
+      return;
+    }
+
+    _momentumController.stop();
+    _isUserDragging = false;
+
+    // One long linear movement. Since the loading state lasts ~5 seconds,
+    // the user never sees an animation restart or seam.
+    final target = _scrollController.offset + (_itemExtent * 300.0);
+
+    unawaited(
+      _scrollController.animateTo(
+        target,
+        duration: const Duration(seconds: 45),
+        curve: Curves.linear,
+      ),
+    );
   }
 
   void _queueSpin(double itemDelta) {
@@ -1139,8 +1223,8 @@ class _ClosetHeroHeaderState extends State<ClosetHeroHeader>
     if (!_scrollController.hasClients) return;
 
     final offset = _scrollController.offset;
-    final lowerBound = _itemExtent * 2000;
-    final upperBound = _itemExtent * (_virtualItemCount - 2000);
+    final lowerBound = _itemExtent * 500;
+    final upperBound = _itemExtent * (_virtualItemCount - 500);
 
     if (offset < lowerBound || offset > upperBound) {
       final itemPosition = offset / _itemExtent;
@@ -1204,7 +1288,7 @@ class _ClosetHeroHeaderState extends State<ClosetHeroHeader>
 
   Widget _buildRackBar() {
     return Positioned(
-      top: 14,
+      top: 54,
       left: 0,
       right: 0,
       child: Container(
@@ -1238,7 +1322,7 @@ class _ClosetHeroHeaderState extends State<ClosetHeroHeader>
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 132,
+      height: 172,
       child: Stack(
         children: [
           _buildRackBar(),
@@ -1292,7 +1376,7 @@ class _ClosetHeroHeaderState extends State<ClosetHeroHeader>
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: _virtualItemCount,
                     itemExtent: _itemExtent,
-                    cacheExtent: _itemExtent * 18,
+                    cacheExtent: _itemExtent * 4,
                     padding: const EdgeInsets.symmetric(horizontal: 6),
                     itemBuilder: (context, index) {
                       final garment = _garments[index % _garments.length];
@@ -1300,7 +1384,7 @@ class _ClosetHeroHeaderState extends State<ClosetHeroHeader>
                       return Align(
                         alignment: Alignment.topCenter,
                         child: Padding(
-                          padding: const EdgeInsets.only(top: 12),
+                          padding: const EdgeInsets.only(top: 52),
                           child: ProductRackGarment(
                             color: garment.color,
                             type: garment.type,
@@ -1335,12 +1419,10 @@ class _ClosetHeroHeaderState extends State<ClosetHeroHeader>
 class _GarmentData {
   final Color color;
   final GarmentType type;
-  final bool faded;
 
   const _GarmentData({
     required this.color,
     required this.type,
-    this.faded = false,
   });
 }
 
@@ -1624,7 +1706,7 @@ Widget build(BuildContext context) {
             child: ClipRRect(
   borderRadius: BorderRadius.circular(32),
   child: BackdropFilter(
-    filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+    filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
     child: Container(
       height: 60,
       decoration: BoxDecoration(
@@ -1797,7 +1879,6 @@ class WardrobeItem {
   });
 
 
-
   bool isAvailableFor(AvatarBodyType bodyType) {
     return bodyType == AvatarBodyType.female
         ? availableForFemale
@@ -1854,6 +1935,7 @@ String get lastWashedLabel {
 }
 
 const List<WardrobeItem> kDemoWardrobeItems = [
+  // MALE TOPS
   WardrobeItem(
     id: 'male_top_zipper_hoodie',
     label: 'Zipper Hoodie',
@@ -1861,10 +1943,10 @@ const List<WardrobeItem> kDemoWardrobeItems = [
     color: Color(0xFF234E7E),
     lastWornDays: 0,
     lastWashedDays: 4,
-    notes: 'Zipper Hoodie.',
+    notes: 'Zipper hoodie.',
     wears: 3,
     season: 'All Season',
-    modelFileName: 'zipper_hoodie.glb',
+    modelFileName: 'zipperhoodiem.glb',
     availableForMale: true,
     availableForFemale: false,
   ),
@@ -1875,10 +1957,38 @@ const List<WardrobeItem> kDemoWardrobeItems = [
     color: Color(0xFFEADDCB),
     lastWornDays: 1,
     lastWashedDays: 5,
-    notes: 'T-Shirt.',
+    notes: 'T-shirt.',
     wears: 4,
     season: 'All Season',
-    modelFileName: 't-shirt.glb',
+    modelFileName: 'tshirtm.glb',
+    availableForMale: true,
+    availableForFemale: false,
+  ),
+  WardrobeItem(
+    id: 'male_top_sweater',
+    label: 'Sweater',
+    category: ClosetCategory.tops,
+    color: Color(0xFF9F8C7A),
+    lastWornDays: 3,
+    lastWashedDays: 7,
+    notes: 'Sweater without a hood.',
+    wears: 6,
+    season: 'All Season',
+    modelFileName: 'sweaterm.glb',
+    availableForMale: true,
+    availableForFemale: false,
+  ),
+  WardrobeItem(
+    id: 'male_top_relaxed_tshirt',
+    label: 'Relaxed T-Shirt',
+    category: ClosetCategory.tops,
+    color: Color(0xFF6F95D1),
+    lastWornDays: 4,
+    lastWashedDays: 8,
+    notes: 'Relaxed fit T-shirt.',
+    wears: 7,
+    season: 'All Season',
+    modelFileName: 'relaxedtshirtm.glb',
     availableForMale: true,
     availableForFemale: false,
   ),
@@ -1892,38 +2002,12 @@ const List<WardrobeItem> kDemoWardrobeItems = [
     notes: 'Pullover.',
     wears: 5,
     season: 'All Season',
-    modelFileName: 'pullover.glb',
+    modelFileName: 'pulloverm.glb',
     availableForMale: true,
     availableForFemale: false,
   ),
-  WardrobeItem(
-    id: 'male_top_sweater',
-    label: 'Sweater',
-    category: ClosetCategory.tops,
-    color: Color(0xFF9F8C7A),
-    lastWornDays: 3,
-    lastWashedDays: 7,
-    notes: 'Sweater.',
-    wears: 6,
-    season: 'All Season',
-    modelFileName: 'sweater-no-hoodie.glb',
-    availableForMale: true,
-    availableForFemale: false,
-  ),
-  WardrobeItem(
-    id: 'male_top_relaxed_tshirt',
-    label: 'Relaxed T-Shirt',
-    category: ClosetCategory.tops,
-    color: Color(0xFF6F95D1),
-    lastWornDays: 4,
-    lastWashedDays: 8,
-    notes: 'Relaxed T-Shirt.',
-    wears: 7,
-    season: 'All Season',
-    modelFileName: 'relaxed-tshirt.glb',
-    availableForMale: true,
-    availableForFemale: false,
-  ),
+
+  // MALE BOTTOMS
   WardrobeItem(
     id: 'male_bottom_jeans',
     label: 'Jeans',
@@ -1945,80 +2029,26 @@ const List<WardrobeItem> kDemoWardrobeItems = [
     color: Color(0xFF2E3035),
     lastWornDays: 6,
     lastWashedDays: 10,
-    notes: 'Black Pants.',
+    notes: 'Black pants.',
     wears: 9,
     season: 'All Season',
     modelFileName: 'blackpants.glb',
     availableForMale: true,
     availableForFemale: false,
   ),
-  WardrobeItem(
-    id: 'male_bottom_shorts',
-    label: 'Shorts',
-    category: ClosetCategory.bottoms,
-    color: Color(0xFFD8CBB9),
-    lastWornDays: 7,
-    lastWashedDays: 11,
-    notes: 'Shorts.',
-    wears: 10,
-    season: 'All Season',
-    modelFileName: 'shorts.glb',
-    availableForMale: true,
-    availableForFemale: false,
-  ),
-  WardrobeItem(
-    id: 'male_bottom_shorter_shorts',
-    label: 'Shorter Shorts',
-    category: ClosetCategory.bottoms,
-    color: Color(0xFFC5B49E),
-    lastWornDays: 8,
-    lastWashedDays: 12,
-    notes: 'Shorter Shorts.',
-    wears: 11,
-    season: 'All Season',
-    modelFileName: 'shorter-shorts.glb',
-    availableForMale: true,
-    availableForFemale: false,
-  ),
+
+  // FEMALE TOPS
   WardrobeItem(
     id: 'female_top_zipper_hoodie',
     label: 'Zipper Hoodie',
     category: ClosetCategory.tops,
     color: Color(0xFF234E7E),
-    lastWornDays: 9,
-    lastWashedDays: 13,
-    notes: 'Zipper Hoodie.',
-    wears: 12,
+    lastWornDays: 0,
+    lastWashedDays: 4,
+    notes: 'Zipper hoodie.',
+    wears: 3,
     season: 'All Season',
-    modelFileName: 'zipperhoodie.glb',
-    availableForMale: false,
-    availableForFemale: true,
-  ),
-  WardrobeItem(
-    id: 'female_top_cropped_shirt',
-    label: 'Cropped Shirt',
-    category: ClosetCategory.tops,
-    color: Color(0xFFF4F1EA),
-    lastWornDays: 10,
-    lastWashedDays: 14,
-    notes: 'Cropped Shirt.',
-    wears: 13,
-    season: 'All Season',
-    modelFileName: 'croppedshirt.glb',
-    availableForMale: false,
-    availableForFemale: true,
-  ),
-  WardrobeItem(
-    id: 'female_top_pullover_hoodie',
-    label: 'Pullover Hoodie',
-    category: ClosetCategory.tops,
-    color: Color(0xFF9F8C7A),
-    lastWornDays: 11,
-    lastWashedDays: 15,
-    notes: 'Pullover Hoodie.',
-    wears: 14,
-    season: 'All Season',
-    modelFileName: 'pulloverhoodie.glb',
+    modelFileName: 'zipperhoodief.glb',
     availableForMale: false,
     availableForFemale: true,
   ),
@@ -2027,10 +2057,10 @@ const List<WardrobeItem> kDemoWardrobeItems = [
     label: 'T-Shirt',
     category: ClosetCategory.tops,
     color: Color(0xFFEADDCB),
-    lastWornDays: 12,
-    lastWashedDays: 16,
-    notes: 'T-Shirt.',
-    wears: 3,
+    lastWornDays: 1,
+    lastWashedDays: 5,
+    notes: 'T-shirt.',
+    wears: 4,
     season: 'All Season',
     modelFileName: 'tshirtf.glb',
     availableForMale: false,
@@ -2041,10 +2071,10 @@ const List<WardrobeItem> kDemoWardrobeItems = [
     label: 'Sweater',
     category: ClosetCategory.tops,
     color: Color(0xFF6C8C7A),
-    lastWornDays: 13,
-    lastWashedDays: 17,
-    notes: 'Sweater.',
-    wears: 4,
+    lastWornDays: 2,
+    lastWashedDays: 6,
+    notes: 'Sweater without a hood.',
+    wears: 5,
     season: 'All Season',
     modelFileName: 'sweaternohoodief.glb',
     availableForMale: false,
@@ -2055,12 +2085,56 @@ const List<WardrobeItem> kDemoWardrobeItems = [
     label: 'Relaxed T-Shirt',
     category: ClosetCategory.tops,
     color: Color(0xFF6F95D1),
-    lastWornDays: 14,
-    lastWashedDays: 0,
-    notes: 'Relaxed T-Shirt.',
+    lastWornDays: 3,
+    lastWashedDays: 7,
+    notes: 'Relaxed fit T-shirt.',
+    wears: 6,
+    season: 'All Season',
+    modelFileName: 'relaxedtshirtf.glb',
+    availableForMale: false,
+    availableForFemale: true,
+  ),
+  WardrobeItem(
+    id: 'female_top_hoodie',
+    label: 'Hoodie',
+    category: ClosetCategory.tops,
+    color: Color(0xFF9F8C7A),
+    lastWornDays: 4,
+    lastWashedDays: 8,
+    notes: 'Pullover hoodie.',
+    wears: 7,
+    season: 'All Season',
+    modelFileName: 'hoodief.glb',
+    availableForMale: false,
+    availableForFemale: true,
+  ),
+  WardrobeItem(
+    id: 'female_top_cropped_shirt',
+    label: 'Cropped Shirt',
+    category: ClosetCategory.tops,
+    color: Color(0xFFF4F1EA),
+    lastWornDays: 5,
+    lastWashedDays: 9,
+    notes: 'Cropped shirt.',
+    wears: 8,
+    season: 'All Season',
+    modelFileName: 'croppedshirtf.glb',
+    availableForMale: false,
+    availableForFemale: true,
+  ),
+
+  // FEMALE BOTTOMS
+  WardrobeItem(
+    id: 'female_bottom_tennis_skirt',
+    label: 'Tennis Skirt',
+    category: ClosetCategory.bottoms,
+    color: Color(0xFFF4F1EA),
+    lastWornDays: 0,
+    lastWashedDays: 3,
+    notes: 'Tennis skirt.',
     wears: 5,
     season: 'All Season',
-    modelFileName: 'relaxed-tshirtf.glb',
+    modelFileName: 'tennisskirtf.glb',
     availableForMale: false,
     availableForFemale: true,
   ),
@@ -2069,8 +2143,8 @@ const List<WardrobeItem> kDemoWardrobeItems = [
     label: 'Sweatpants',
     category: ClosetCategory.bottoms,
     color: Color(0xFF545A61),
-    lastWornDays: 15,
-    lastWashedDays: 1,
+    lastWornDays: 1,
+    lastWashedDays: 4,
     notes: 'Sweatpants.',
     wears: 6,
     season: 'All Season',
@@ -2079,44 +2153,30 @@ const List<WardrobeItem> kDemoWardrobeItems = [
     availableForFemale: true,
   ),
   WardrobeItem(
-    id: 'female_bottom_pencil_pleated_skirt',
-    label: 'Pencil Pleated Skirt',
-    category: ClosetCategory.bottoms,
-    color: Color(0xFF6C8C7A),
-    lastWornDays: 0,
-    lastWashedDays: 2,
-    notes: 'Pencil Pleated Skirt.',
-    wears: 7,
-    season: 'All Season',
-    modelFileName: 'pencilpleatedskirt.glb',
-    availableForMale: false,
-    availableForFemale: true,
-  ),
-  WardrobeItem(
     id: 'female_bottom_skinny_jeans',
     label: 'Skinny Jeans',
     category: ClosetCategory.bottoms,
     color: Color(0xFF5579A8),
-    lastWornDays: 1,
-    lastWashedDays: 3,
-    notes: 'Skinny Jeans.',
-    wears: 8,
+    lastWornDays: 2,
+    lastWashedDays: 5,
+    notes: 'Skinny jeans.',
+    wears: 7,
     season: 'All Season',
-    modelFileName: 'skinnyjeans.glb',
+    modelFileName: 'skinnyjeansf.glb',
     availableForMale: false,
     availableForFemale: true,
   ),
   WardrobeItem(
-    id: 'female_bottom_tennis_skirt',
-    label: 'Tennis Skirt',
+    id: 'female_bottom_pencil_pleated_skirt',
+    label: 'Pencil Pleated Skirt',
     category: ClosetCategory.bottoms,
-    color: Color(0xFFF4F1EA),
-    lastWornDays: 2,
-    lastWashedDays: 4,
-    notes: 'Tennis Skirt.',
-    wears: 9,
+    color: Color(0xFF6C8C7A),
+    lastWornDays: 3,
+    lastWashedDays: 6,
+    notes: 'Pencil pleated skirt.',
+    wears: 8,
     season: 'All Season',
-    modelFileName: 'tennisskirt.glb',
+    modelFileName: 'pencilpleatedskirt.glb',
     availableForMale: false,
     availableForFemale: true,
   ),
@@ -2126,6 +2186,18 @@ List<WardrobeItem> wardrobeItemsFor(AvatarBodyType bodyType) {
   return kDemoWardrobeItems
       .where((item) => item.isAvailableFor(bodyType))
       .toList(growable: false);
+}
+
+class SavedOutfit {
+  final WardrobeItem top;
+  final WardrobeItem bottom;
+
+  const SavedOutfit({
+    required this.top,
+    required this.bottom,
+  });
+
+  String get id => '${top.id}__${bottom.id}';
 }
 
 /// ---------- Home ----------
@@ -2140,36 +2212,351 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   ClosetCategory selectedCategory = ClosetCategory.tops;
 
-  late WardrobeItem selectedTop;
-  late WardrobeItem selectedBottom;
+  WardrobeItem? selectedTop;
+  WardrobeItem? selectedBottom;
 
   AvatarBodyType? _lastBodyType;
 
-  @override
-  void initState() {
-    super.initState();
-    selectedTop = kDemoWardrobeItems.firstWhere(
-      (item) => item.category == ClosetCategory.tops,
+  final List<SavedOutfit> _favouriteOutfits = [];
+
+  String _favouritesStorageKey(AvatarBodyType bodyType) =>
+      'textyle.favourites.${bodyType.name}';
+
+  bool get _currentOutfitIsFavourite {
+    final top = selectedTop;
+    final bottom = selectedBottom;
+    if (top == null || bottom == null) return false;
+
+    final id = '${top.id}__${bottom.id}';
+    return _favouriteOutfits.any((outfit) => outfit.id == id);
+  }
+
+  void _loadFavouritesForBody(AvatarBodyType bodyType) {
+    final availableItems = wardrobeItemsFor(bodyType);
+    final itemsById = <String, WardrobeItem>{
+      for (final item in availableItems) item.id: item,
+    };
+
+    final raw = html.window.localStorage[_favouritesStorageKey(bodyType)];
+
+    _favouriteOutfits.clear();
+
+    if (raw == null || raw.trim().isEmpty) return;
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+
+      final seen = <String>{};
+
+      for (final entry in decoded) {
+        if (entry is! Map) continue;
+
+        final topId = entry['topId']?.toString();
+        final bottomId = entry['bottomId']?.toString();
+
+        if (topId == null || bottomId == null) continue;
+
+        final top = itemsById[topId];
+        final bottom = itemsById[bottomId];
+
+        if (top == null ||
+            bottom == null ||
+            top.category != ClosetCategory.tops ||
+            bottom.category != ClosetCategory.bottoms) {
+          continue;
+        }
+
+        final outfit = SavedOutfit(top: top, bottom: bottom);
+        if (seen.add(outfit.id)) {
+          _favouriteOutfits.add(outfit);
+        }
+      }
+    } catch (_) {
+      // Ignore malformed/stale saved data and start with an empty list.
+      _favouriteOutfits.clear();
+    }
+  }
+
+  void _persistFavourites() {
+    final bodyType = context.read<AvatarSettings>().bodyType;
+    final payload = _favouriteOutfits
+        .map(
+          (outfit) => <String, String>{
+            'topId': outfit.top.id,
+            'bottomId': outfit.bottom.id,
+          },
+        )
+        .toList(growable: false);
+
+    html.window.localStorage[_favouritesStorageKey(bodyType)] =
+        jsonEncode(payload);
+  }
+
+  void _toggleFavouriteOutfit() {
+    final top = selectedTop;
+    final bottom = selectedBottom;
+
+    if (top == null || bottom == null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            duration: Duration(milliseconds: 1400),
+            behavior: SnackBarBehavior.floating,
+            content: Text('Choose a top and bottom before saving an outfit'),
+          ),
+        );
+      return;
+    }
+
+    final currentId = '${top.id}__${bottom.id}';
+    final existingIndex = _favouriteOutfits.indexWhere(
+      (outfit) => outfit.id == currentId,
     );
-    selectedBottom = kDemoWardrobeItems.firstWhere(
-      (item) => item.category == ClosetCategory.bottoms,
+
+    final wasSaved = existingIndex >= 0;
+
+    setState(() {
+      if (wasSaved) {
+        _favouriteOutfits.removeAt(existingIndex);
+      } else {
+        // Newest saves appear first in the Favourites sheet.
+        _favouriteOutfits.insert(
+          0,
+          SavedOutfit(top: top, bottom: bottom),
+        );
+      }
+    });
+
+    _persistFavourites();
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          duration: const Duration(milliseconds: 1200),
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            wasSaved
+                ? 'Removed from favourites'
+                : 'Outfit saved to favourites',
+          ),
+        ),
+      );
+  }
+
+  void _applyFavouriteOutfit(SavedOutfit outfit) {
+    setState(() {
+      selectedTop = outfit.top;
+      selectedBottom = outfit.bottom;
+    });
+
+    Navigator.of(context).pop();
+  }
+
+  void _removeFavouriteOutfit(SavedOutfit outfit) {
+    setState(() {
+      _favouriteOutfits.removeWhere((saved) => saved.id == outfit.id);
+    });
+
+    _persistFavourites();
+  }
+
+  void _showFavourites() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.72,
+              ),
+              decoration: const BoxDecoration(
+                color: Color(0xFFF8FBFF),
+                borderRadius: BorderRadius.vertical(
+                  top: Radius.circular(34),
+                ),
+              ),
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 14, 22, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: AppColors.border,
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Row(
+                        children: [
+                          const Text(
+                            'Favourites',
+                            style: TextStyle(
+                              fontSize: 26,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.8,
+                              color: AppColors.textDark,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '${_favouriteOutfits.length} saved',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      if (_favouriteOutfits.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 44),
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.bookmark_border_rounded,
+                                size: 38,
+                                color: AppColors.textMuted,
+                              ),
+                              SizedBox(height: 12),
+                              Text(
+                                'No saved outfits yet',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textDark,
+                                ),
+                              ),
+                              SizedBox(height: 5),
+                              Text(
+                                'Tap the bookmark beside the avatar to save an outfit here.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.textMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        Flexible(
+                          child: ListView.separated(
+                            shrinkWrap: true,
+                            physics: const BouncingScrollPhysics(),
+                            itemCount: _favouriteOutfits.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (context, index) {
+                              final outfit = _favouriteOutfits[index];
+
+                              return Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(24),
+                                  onTap: () => _applyFavouriteOutfit(outfit),
+                                  child: Container(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      14, 12, 8, 12,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.82),
+                                      borderRadius: BorderRadius.circular(24),
+                                      border: Border.all(
+                                        color: Colors.white.withOpacity(0.95),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        _FavouritePiecePreview(item: outfit.top),
+                                        const SizedBox(width: 7),
+                                        _FavouritePiecePreview(item: outfit.bottom),
+                                        const SizedBox(width: 16),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                '${outfit.top.label} + ${outfit.bottom.label}',
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: AppColors.textDark,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              const Text(
+                                                'Tap to wear this outfit',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w500,
+                                                  color: AppColors.textMuted,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        IconButton(
+                                          tooltip: 'Remove favourite',
+                                          onPressed: () {
+                                            _removeFavouriteOutfit(outfit);
+                                            setSheetState(() {});
+                                          },
+                                          icon: const Icon(
+                                            Icons.bookmark_remove_outlined,
+                                            color: AppColors.primary,
+                                            size: 21,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+
     final bodyType = context.watch<AvatarSettings>().bodyType;
     if (_lastBodyType == bodyType) return;
+
     _lastBodyType = bodyType;
 
-    final available = wardrobeItemsFor(bodyType);
-    selectedTop = available.firstWhere(
-      (item) => item.category == ClosetCategory.tops,
-    );
-    selectedBottom = available.firstWhere(
-      (item) => item.category == ClosetCategory.bottoms,
-    );
+    // Switching avatar body starts from a clean outfit slate.
+    selectedTop = null;
+    selectedBottom = null;
+
+    // Each avatar body keeps its own compatible saved-outfit collection.
+    _loadFavouritesForBody(bodyType);
   }
 
   List<WardrobeItem> get visibleItems {
@@ -2231,6 +2618,8 @@ Widget build(BuildContext context) {
             _FloatingOutfitHero(
               selectedTop: selectedTop,
               selectedBottom: selectedBottom,
+              isFavourite: _currentOutfitIsFavourite,
+              onFavouriteTap: _toggleFavouriteOutfit,
               onWeatherTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -2259,7 +2648,6 @@ Widget build(BuildContext context) {
           const SizedBox(height: 22),
 
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text(
                   'Closet',
@@ -2269,6 +2657,50 @@ Widget build(BuildContext context) {
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.8,
                     color: AppColors.textDark,
+                  ),
+                ),
+                const Spacer(),
+                GestureDetector(
+                  onTap: _showFavourites,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 5,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Favourites',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                        if (_favouriteOutfits.isNotEmpty) ...[
+                          const SizedBox(width: 5),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withOpacity(0.10),
+                              borderRadius: BorderRadius.circular(99),
+                            ),
+                            child: Text(
+                              '${_favouriteOutfits.length}',
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -2330,7 +2762,7 @@ class _HomeHeader extends StatelessWidget {
 }
 
 
-class _MiniWeatherBadge extends StatelessWidget {
+class _MiniWeatherBadge extends StatefulWidget {
   final VoidCallback onTap;
 
   const _MiniWeatherBadge({
@@ -2338,9 +2770,22 @@ class _MiniWeatherBadge extends StatelessWidget {
   });
 
   @override
+  State<_MiniWeatherBadge> createState() => _MiniWeatherBadgeState();
+}
+
+class _MiniWeatherBadgeState extends State<_MiniWeatherBadge> {
+  late final Future<Map<String, dynamic>> _weatherFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _weatherFuture = fetchHamiltonWeather();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<Map<String, dynamic>>(
-      future: fetchHamiltonWeather(),
+      future: _weatherFuture,
       builder: (context, snapshot) {
         final hasWeather = snapshot.hasData;
 
@@ -2360,31 +2805,37 @@ class _MiniWeatherBadge extends StatelessWidget {
           color: Colors.transparent,
           child: InkWell(
             borderRadius: BorderRadius.circular(999),
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    hasWeather
-                        ? weatherIcon(code, isDay)
-                        : Icons.cloud_outlined,
-                    color: AppColors.primary,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    hasWeather ? '$temp°' : '--°',
-                    style: const TextStyle(
-                      fontSize: 20,
-                      height: 2,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.3,
-                      color: AppColors.textDark,
+            onTap: widget.onTap,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                minWidth: 72,
+                minHeight: 52,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      hasWeather
+                          ? weatherIcon(code, isDay)
+                          : Icons.cloud_outlined,
+                      color: AppColors.primary,
+                      size: 20,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 6),
+                    Text(
+                      hasWeather ? '$temp°' : '--°',
+                      style: const TextStyle(
+                        fontSize: 20,
+                        height: 1,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.3,
+                        color: AppColors.textDark,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -2857,8 +3308,8 @@ class _AvatarBodyOption extends StatelessWidget {
 
 
 class _ThreeDAvatarPreview extends StatefulWidget {
-  final WardrobeItem selectedTop;
-  final WardrobeItem selectedBottom;
+  final WardrobeItem? selectedTop;
+  final WardrobeItem? selectedBottom;
 
   const _ThreeDAvatarPreview({
     super.key,
@@ -2871,18 +3322,31 @@ class _ThreeDAvatarPreview extends StatefulWidget {
 }
 
 class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
-  static const String _viewType = 'textyle-three-outfit-dynamic-v1';
-  static bool _viewRegistered = false;
-  static html.IFrameElement? _iframe;
+  // Flutter Web platform-view factories cannot be unregistered. Using one
+  // static view type across login sessions leaves the next Home page pointing
+  // at the iframe from the previous (disposed) session.
+  //
+  // Give every avatar preview instance its own view type and iframe instead.
+  static int _nextViewerId = 0;
+
+  late final String _viewType =
+      'textyle-three-outfit-dynamic-${_nextViewerId++}';
+
+  bool _viewRegistered = false;
+  html.IFrameElement? _iframe;
+  StreamSubscription<html.Event>? _iframeLoadSubscription;
   String? _lastAvatarAsset;
+
+  double _pendingRotationDelta = 0;
+  bool _rotationFrameScheduled = false;
 
   AvatarBodyType get _bodyType =>
       context.read<AvatarSettings>().bodyType;
 
   String get _topAsset =>
-      widget.selectedTop.modelAssetFor(_bodyType) ?? '';
+      widget.selectedTop?.modelAssetFor(_bodyType) ?? '';
   String get _bottomAsset =>
-      widget.selectedBottom.modelAssetFor(_bodyType) ?? '';
+      widget.selectedBottom?.modelAssetFor(_bodyType) ?? '';
 
   String _buildViewerSource(String avatarAsset) {
     return Uri(
@@ -2916,7 +3380,9 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
           ..touchAction = 'none';
 
         _iframe = iframe;
-        iframe.onLoad.listen((_) => _syncEntireOutfit());
+        _iframeLoadSubscription?.cancel();
+        _iframeLoadSubscription =
+            iframe.onLoad.listen((_) => _syncEntireOutfit());
         return iframe;
       },
     );
@@ -2938,12 +3404,27 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
     });
   }
 
-  void _sendWithRetry(Map<String, Object> message) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+  void _sendToViewer(Map<String, Object> message) {
+    if (!mounted || _iframe == null) return;
+    _postMessage(message);
+  }
+
+  void _queueRotation(double deltaX) {
+    _pendingRotationDelta += deltaX;
+    if (_rotationFrameScheduled) return;
+
+    _rotationFrameScheduled = true;
+    WidgetsBinding.instance.scheduleFrameCallback((_) {
+      _rotationFrameScheduled = false;
       if (!mounted) return;
-      _postMessage(message);
-      Future<void>.delayed(const Duration(milliseconds: 120), () {
-        if (mounted) _postMessage(message);
+
+      final delta = _pendingRotationDelta;
+      _pendingRotationDelta = 0;
+
+      if (delta.abs() < 0.01) return;
+      _postMessage(<String, Object>{
+        'type': 'textyle-rotate-avatar',
+        'deltaX': delta,
       });
     });
   }
@@ -2956,7 +3437,7 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
     if (_lastAvatarAsset == avatarAsset) return;
 
     _lastAvatarAsset = avatarAsset;
-    _sendWithRetry(<String, Object>{
+    _sendToViewer(<String, Object>{
       'type': 'textyle-set-body-outfit',
       'avatar': avatarAsset,
       'top': _topAsset,
@@ -2968,20 +3449,36 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
   void didUpdateWidget(covariant _ThreeDAvatarPreview oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    if (oldWidget.selectedTop.modelFileName != widget.selectedTop.modelFileName) {
-      _sendWithRetry(<String, Object>{
+    if (oldWidget.selectedTop?.modelFileName !=
+        widget.selectedTop?.modelFileName) {
+      _sendToViewer(<String, Object>{
         'type': 'textyle-set-top',
         'asset': _topAsset,
       });
     }
 
-    if (oldWidget.selectedBottom.modelFileName !=
-        widget.selectedBottom.modelFileName) {
-      _sendWithRetry(<String, Object>{
+    if (oldWidget.selectedBottom?.modelFileName !=
+        widget.selectedBottom?.modelFileName) {
+      _sendToViewer(<String, Object>{
         'type': 'textyle-set-bottom',
         'asset': _bottomAsset,
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _iframeLoadSubscription?.cancel();
+    _iframeLoadSubscription = null;
+
+    final iframe = _iframe;
+    _iframe = null;
+    if (iframe != null) {
+      iframe.src = 'about:blank';
+      iframe.remove();
+    }
+
+    super.dispose();
   }
 
   @override
@@ -2992,28 +3489,13 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onHorizontalDragUpdate: (details) {
-        _postMessage(<String, Object>{
-          'type': 'textyle-rotate-avatar',
-          'deltaX': details.delta.dx,
-        });
+        _queueRotation(details.delta.dx);
       },
       child: SizedBox(
         width: 300,
         height: 400,
-        child: OverflowBox(
-          minWidth: 700,
-          maxWidth: 700,
-          minHeight: 970,
-          maxHeight: 970,
-          alignment: Alignment.center,
-          child: Transform.scale(
-            scale: 0.50,
-            child: const SizedBox(
-              width: 300,
-              height: 620,
-              child: HtmlElementView(viewType: _viewType),
-            ),
-          ),
+        child: ClipRect(
+          child: HtmlElementView(viewType: _viewType),
         ),
       ),
     );
@@ -3021,13 +3503,17 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
 }
 
 class _FloatingOutfitHero extends StatelessWidget {
-  final WardrobeItem selectedTop;
-  final WardrobeItem selectedBottom;
+  final WardrobeItem? selectedTop;
+  final WardrobeItem? selectedBottom;
+  final bool isFavourite;
+  final VoidCallback onFavouriteTap;
   final VoidCallback onWeatherTap;
 
   const _FloatingOutfitHero({
     required this.selectedTop,
     required this.selectedBottom,
+    required this.isFavourite,
+    required this.onFavouriteTap,
     required this.onWeatherTap,
   });
 
@@ -3041,19 +3527,27 @@ class _FloatingOutfitHero extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           Positioned(
-            top: 5,
-            left: 10,
+            top: -8,
+            left: -2,
             child: _MiniWeatherBadge(
               onTap: onWeatherTap,
             ),
           ),
           Positioned(
-            bottom: -2,
-            right: 8,
-            child: _PlainHomeIconButton(
-              icon: Icons.bookmark_border_rounded,
-              iconSize: 25,
-              onTap: () {},
+            bottom: -14,
+            right: -4,
+            child: SizedBox(
+              width: 56,
+              height: 56,
+              child: Center(
+                child: _PlainHomeIconButton(
+                  icon: isFavourite
+                      ? Icons.bookmark_rounded
+                      : Icons.bookmark_border_rounded,
+                  iconSize: 25,
+                  onTap: onFavouriteTap,
+                ),
+              ),
             ),
           ),
           Positioned(
@@ -3073,6 +3567,58 @@ class _FloatingOutfitHero extends StatelessWidget {
   }
 }
 
+
+class _ModelPreviewFallback extends StatelessWidget {
+  final double size;
+
+  const _ModelPreviewFallback({
+    this.size = 24,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Icon(
+        Icons.view_in_ar_rounded,
+        size: size,
+        color: AppColors.textMuted,
+      ),
+    );
+  }
+}
+
+class _FavouritePiecePreview extends StatelessWidget {
+  final WardrobeItem item;
+
+  const _FavouritePiecePreview({
+    required this.item,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 62,
+      height: 62,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF2F5F8),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.95),
+          width: 1,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(5),
+        child: _ClothingModelThumbnail(
+          key: ValueKey<String>('favourite-uniform-${item.id}'),
+          item: item,
+          fallback: const _ModelPreviewFallback(size: 26),
+        ),
+      ),
+    );
+  }
+}
 
 class _DispenseOutfitButton extends StatelessWidget {
   final VoidCallback onTap;
@@ -3142,65 +3688,9 @@ class _DispenseOutfitButton extends StatelessWidget {
   }
 }
 
-class _LayeredAvatarPreview extends StatelessWidget {
-  final WardrobeItem selectedTop;
-  final WardrobeItem selectedBottom;
-
-  const _LayeredAvatarPreview({
-    required this.selectedTop,
-    required this.selectedBottom,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final topAsset = selectedTop.overlayAsset;
-    final bottomAsset = selectedBottom.overlayAsset;
-
-    return SizedBox(
-      width: 145,
-      height: 200,
-      child: Stack(
-        alignment: Alignment.topCenter,
-        clipBehavior: Clip.none,
-        children: [
-          Positioned(
-            top: 15,
-            child: Image.asset(
-              'assets/avatar/base_avatar.png',
-              width: 140,
-              height: 215,
-              fit: BoxFit.contain,
-            ),
-          ),
-
-          if (bottomAsset != null)
-            Positioned(
-              top: 45,
-              child: Image.asset(
-                bottomAsset,
-                width: 115,
-                fit: BoxFit.contain,
-              ),
-            ),
-
-          if (topAsset != null)
-            Positioned(
-              top: 30,
-              child: Image.asset(
-                topAsset,
-                width: 125,
-                fit: BoxFit.contain,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
 class _SelectedPiecesRow extends StatelessWidget {
-  final WardrobeItem selectedTop;
-  final WardrobeItem selectedBottom;
+  final WardrobeItem? selectedTop;
+  final WardrobeItem? selectedBottom;
   final ValueChanged<WardrobeItem> onSelectItem;
 
   const _SelectedPiecesRow({
@@ -3248,8 +3738,7 @@ class _SelectedPiecesRow extends StatelessWidget {
       children: [
         Expanded(
           child: _SelectedPieceMiniCard(
-            title: selectedTop.label,
-            subtitle: 'Top',
+            label: 'Top',
             item: selectedTop,
             onTap: () {
               _showInventoryPicker(
@@ -3263,8 +3752,7 @@ class _SelectedPiecesRow extends StatelessWidget {
         const SizedBox(width: 14),
         Expanded(
           child: _SelectedPieceMiniCard(
-            title: selectedBottom.label,
-            subtitle: 'Bottom',
+            label: 'Bottom',
             item: selectedBottom,
             onTap: () {
               _showInventoryPicker(
@@ -3281,93 +3769,98 @@ class _SelectedPiecesRow extends StatelessWidget {
 }
 
 class _SelectedPieceMiniCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final WardrobeItem item;
+  final String label;
+  final WardrobeItem? item;
   final VoidCallback onTap;
 
   const _SelectedPieceMiniCard({
-    required this.title,
-    required this.subtitle,
+    required this.label,
     required this.item,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isTop = item.category == ClosetCategory.tops;
+    final piece = item;
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 62,
-        padding: const EdgeInsets.fromLTRB(10, 8, 14, 8),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.78),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: Colors.white.withOpacity(0.95),
-            width: 1.1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.028),
-              blurRadius: 14,
-              offset: const Offset(0, 7),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          height: 64,
+          padding: const EdgeInsets.fromLTRB(10, 7, 16, 7),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.84),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: Colors.white.withOpacity(0.96),
             ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: item.color.withOpacity(0.10),
-                shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
               ),
-              child: Center(
-                child: CustomPaint(
-                  size: const Size(26, 26),
-                  painter: isTop
-                      ? _SimpleTopPainter(item.color)
-                      : _SimpleBottomPainter(item.color),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: piece == null
+                      ? AppColors.surface
+                      : piece.color.withOpacity(0.07),
+                  shape: BoxShape.circle,
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: piece == null
+                    ? const Icon(
+                        Icons.add_rounded,
+                        size: 22,
+                        color: AppColors.primary,
+                      )
+                    : _ClothingModelThumbnail(
+                        key: ValueKey<String>('selected-pill-3d-${piece.id}'),
+                        item: piece,
+                        fallback: const _ModelPreviewFallback(size: 24),
+                      ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      piece?.label ?? 'Choose ${label.toLowerCase()}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w800,
+                        color: piece == null
+                            ? AppColors.primary
+                            : AppColors.textDark,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-
-            const SizedBox(width: 10),
-
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF9AA0A7),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w900,
-                      color: AppColors.textDark,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -3377,7 +3870,7 @@ class _SelectedPieceMiniCard extends StatelessWidget {
 class _InventoryPickerSheet extends StatelessWidget {
   final String title;
   final List<WardrobeItem> items;
-  final WardrobeItem selectedItem;
+  final WardrobeItem? selectedItem;
   final ValueChanged<WardrobeItem> onSelectItem;
 
   const _InventoryPickerSheet({
@@ -3451,7 +3944,7 @@ class _InventoryPickerSheet extends StatelessWidget {
                   ),
                   itemBuilder: (context, index) {
                     final item = items[index];
-                    final isSelected = item.id == selectedItem.id;
+                    final isSelected = item.id == selectedItem?.id;
 
                     return _InventoryPickerTile(
                       item: item,
@@ -3482,8 +3975,6 @@ class _InventoryPickerTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isTop = item.category == ClosetCategory.tops;
-
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(28),
@@ -3513,12 +4004,11 @@ class _InventoryPickerTile extends StatelessWidget {
           ),
           child: Stack(
             children: [
-              Center(
-                child: CustomPaint(
-                  size: const Size(54, 54),
-                  painter: isTop
-                      ? _SimpleTopPainter(item.color)
-                      : _SimpleBottomPainter(item.color),
+              Positioned.fill(
+                child: _ClothingModelThumbnail(
+                  key: ValueKey<String>('picker-3d-${item.id}'),
+                  item: item,
+                  fallback: const _ModelPreviewFallback(size: 32),
                 ),
               ),
 
@@ -3553,8 +4043,8 @@ class _HomeClosetGrid extends StatelessWidget {
   final ClosetCategory selectedCategory;
   final ValueChanged<ClosetCategory> onCategoryChanged;
   final List<WardrobeItem> items;
-  final WardrobeItem selectedTop;
-  final WardrobeItem selectedBottom;
+  final WardrobeItem? selectedTop;
+  final WardrobeItem? selectedBottom;
   final ValueChanged<WardrobeItem> onSelectItem;
 
   const _HomeClosetGrid({
@@ -3604,7 +4094,7 @@ class _HomeClosetGrid extends StatelessWidget {
             final item = items[index];
 
             final isSelected =
-                item.id == selectedTop.id || item.id == selectedBottom.id;
+                item.id == selectedTop?.id || item.id == selectedBottom?.id;
 
             return _ClosetGridTile(
               item: item,
@@ -3617,111 +4107,6 @@ class _HomeClosetGrid extends StatelessWidget {
       ],
     );
   }
-}
-
-
-class _SimpleTopPainter extends CustomPainter {
-  final Color color;
-
-  _SimpleTopPainter(this.color);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = color;
-    final shadow = Paint()..color = Colors.black.withOpacity(0.06);
-
-    final path = Path()
-      ..moveTo(size.width * 0.30, size.height * 0.22)
-      ..lineTo(size.width * 0.12, size.height * 0.38)
-      ..lineTo(size.width * 0.24, size.height * 0.52)
-      ..lineTo(size.width * 0.32, size.height * 0.46)
-      ..lineTo(size.width * 0.32, size.height * 0.86)
-      ..lineTo(size.width * 0.68, size.height * 0.86)
-      ..lineTo(size.width * 0.68, size.height * 0.46)
-      ..lineTo(size.width * 0.76, size.height * 0.52)
-      ..lineTo(size.width * 0.88, size.height * 0.38)
-      ..lineTo(size.width * 0.70, size.height * 0.22)
-      ..close();
-
-    canvas.drawPath(path.shift(const Offset(0, 3)), shadow);
-    canvas.drawPath(path, paint);
-
-    final collarPaint = Paint()..color = Colors.white.withOpacity(0.45);
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(size.width * 0.50, size.height * 0.23),
-        width: size.width * 0.34,
-        height: size.height * 0.18,
-      ),
-      collarPaint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class _SimpleBottomPainter extends CustomPainter {
-  final Color color;
-
-  _SimpleBottomPainter(this.color);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = color;
-    final shadow = Paint()..color = Colors.black.withOpacity(0.07);
-
-    final leftLeg = RRect.fromRectAndRadius(
-      Rect.fromLTWH(
-        size.width * 0.22,
-        size.height * 0.14,
-        size.width * 0.22,
-        size.height * 0.72,
-      ),
-      const Radius.circular(4),
-    );
-
-    final rightLeg = RRect.fromRectAndRadius(
-      Rect.fromLTWH(
-        size.width * 0.56,
-        size.height * 0.14,
-        size.width * 0.22,
-        size.height * 0.72,
-      ),
-      const Radius.circular(4),
-    );
-
-    canvas.drawRRect(leftLeg.shift(const Offset(0, 3)), shadow);
-    canvas.drawRRect(rightLeg.shift(const Offset(0, 3)), shadow);
-    canvas.drawRRect(leftLeg, paint);
-    canvas.drawRRect(rightLeg, paint);
-
-    final waist = RRect.fromRectAndRadius(
-      Rect.fromLTWH(
-        size.width * 0.20,
-        size.height * 0.10,
-        size.width * 0.60,
-        size.height * 0.18,
-      ),
-      const Radius.circular(6),
-    );
-
-    canvas.drawRRect(waist, paint);
-
-    final seamPaint = Paint()
-      ..color = Colors.white.withOpacity(0.22)
-      ..strokeWidth = 2
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawLine(
-      Offset(size.width * 0.50, size.height * 0.24),
-      Offset(size.width * 0.50, size.height * 0.84),
-      seamPaint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 
@@ -3987,7 +4372,6 @@ class _CleanCategorySwitcher extends StatelessWidget {
 }
 
 
-
 class _ClothingModelThumbnail extends StatefulWidget {
   final WardrobeItem item;
   final Widget fallback;
@@ -4004,7 +4388,8 @@ class _ClothingModelThumbnail extends StatefulWidget {
 }
 
 class _ClothingModelThumbnailState extends State<_ClothingModelThumbnail> {
-  static final Set<String> _registeredViewTypes = <String>{};
+  static int _nextFactoryId = 0;
+  static final Map<String, String> _viewTypesByAsset = <String, String>{};
 
   String? _modelAsset;
   String? _viewType;
@@ -4037,11 +4422,7 @@ class _ClothingModelThumbnailState extends State<_ClothingModelThumbnail> {
     _modelAsset = _resolveModelAsset(widget.item, bodyType);
     _viewType = _modelAsset == null
         ? null
-        : 'closet-model-${widget.item.id}-${_modelAsset.hashCode.abs()}';
-
-    if (_modelAsset != null && _viewType != null) {
-      _registerViewFactory(_viewType!, _modelAsset!);
-    }
+        : _ensureViewFactory(_modelAsset!);
   }
 
   String? _resolveModelAsset(
@@ -4055,10 +4436,11 @@ class _ClothingModelThumbnailState extends State<_ClothingModelThumbnail> {
     return asset;
   }
 
-  void _registerViewFactory(String viewType, String modelAsset) {
-    if (_registeredViewTypes.contains(viewType)) return;
-    _registeredViewTypes.add(viewType);
+  static String _ensureViewFactory(String modelAsset) {
+    final existing = _viewTypesByAsset[modelAsset];
+    if (existing != null) return existing;
 
+    final viewType = 'closet-model-factory-${_nextFactoryId++}';
     final source = Uri(
       path: '/model_thumb.html',
       queryParameters: <String, String>{'model': modelAsset},
@@ -4074,9 +4456,13 @@ class _ClothingModelThumbnailState extends State<_ClothingModelThumbnail> {
           ..style.border = '0'
           ..style.backgroundColor = 'transparent'
           ..style.pointerEvents = 'none'
-          ..setAttribute('aria-label', '${widget.item.label} 3D preview');
+          ..setAttribute('scrolling', 'no')
+          ..setAttribute('aria-hidden', 'true');
       },
     );
+
+    _viewTypesByAsset[modelAsset] = viewType;
+    return viewType;
   }
 
   @override
@@ -4109,8 +4495,6 @@ class _ClosetGridTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isTop = item.category == ClosetCategory.tops;
-
     return GestureDetector(
       onTap: onTap,
       onLongPress: onInfoTap,
@@ -4138,12 +4522,7 @@ class _ClosetGridTile extends StatelessWidget {
               child: _ClothingModelThumbnail(
                 key: ValueKey<String>('closet-3d-${item.id}'),
                 item: item,
-                fallback: CustomPaint(
-                  size: const Size(70, 70),
-                  painter: isTop
-                      ? _SimpleTopPainter(item.color)
-                      : _SimpleBottomPainter(item.color),
-                ),
+                fallback: const _ModelPreviewFallback(size: 32),
               ),
             ),
           ],
@@ -4162,8 +4541,6 @@ class _ClothingInfoSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isTop = item.category == ClosetCategory.tops;
-
     return Container(
       height: MediaQuery.of(context).size.height * 0.55,
       margin: const EdgeInsets.all(16),
@@ -4204,13 +4581,11 @@ class _ClothingInfoSheet extends StatelessWidget {
                 color: item.color.withOpacity(0.10),
                 borderRadius: BorderRadius.circular(28),
               ),
-              child: Center(
-                child: CustomPaint(
-                  size: const Size(62, 62),
-                  painter: isTop
-                      ? _SimpleTopPainter(item.color)
-                      : _SimpleBottomPainter(item.color),
-                ),
+              clipBehavior: Clip.antiAlias,
+              child: _ClothingModelThumbnail(
+                key: ValueKey<String>('info-sheet-3d-${item.id}'),
+                item: item,
+                fallback: const _ModelPreviewFallback(size: 30),
               ),
             ),
 
@@ -4337,163 +4712,6 @@ class _InfoStatCard extends StatelessWidget {
   }
 }
 
-
-class _ClothingPreviewCard extends StatelessWidget {
-  final ClosetCategory category;
-  final Color color;
-  final bool hero;
-
-  const _ClothingPreviewCard({
-    required this.category,
-    required this.color,
-    this.hero = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    switch (category) {
-      case ClosetCategory.tops:
-        return CustomPaint(
-          size: Size(hero ? 86 : 54, hero ? 82 : 56),
-          painter: _MiniTopPainter(color),
-        );
-      case ClosetCategory.bottoms:
-        return CustomPaint(
-          size: Size(hero ? 70 : 46, hero ? 88 : 60),
-          painter: _MiniPantsPainter(color),
-        );
-    }
-  }
-}
-
-
-class _MiniTopPainter extends CustomPainter {
-  final Color color;
-  const _MiniTopPainter(this.color);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final shadow = Paint()
-      ..color = Colors.black.withOpacity(0.10)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9);
-    final path = _shirtPath(size);
-    canvas.save();
-    canvas.translate(0, 6);
-    canvas.drawPath(path, shadow);
-    canvas.restore();
-
-    final fill = Paint()
-      ..shader = LinearGradient(
-        colors: [_lighten(color, 0.18), color, _darken(color, 0.05)],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ).createShader(Offset.zero & size);
-    canvas.drawPath(path, fill);
-
-    final hi = Paint()
-      ..shader = LinearGradient(
-        colors: [Colors.white.withOpacity(0.45), Colors.transparent],
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-      ).createShader(Offset.zero & size);
-    canvas.drawOval(Rect.fromCenter(center: Offset(size.width * 0.5, size.height * 0.20), width: size.width * 0.42, height: size.height * 0.20), hi);
-  }
-
-  Path _shirtPath(Size s) {
-    final w = s.width;
-    final h = s.height;
-    return Path()
-      ..moveTo(w * 0.32, h * 0.16)
-      ..lineTo(w * 0.20, h * 0.27)
-      ..lineTo(w * 0.06, h * 0.38)
-      ..lineTo(w * 0.17, h * 0.52)
-      ..lineTo(w * 0.27, h * 0.47)
-      ..lineTo(w * 0.27, h * 0.91)
-      ..quadraticBezierTo(w * 0.50, h * 1.02, w * 0.73, h * 0.91)
-      ..lineTo(w * 0.73, h * 0.47)
-      ..lineTo(w * 0.83, h * 0.52)
-      ..lineTo(w * 0.94, h * 0.38)
-      ..lineTo(w * 0.80, h * 0.27)
-      ..lineTo(w * 0.68, h * 0.16)
-      ..quadraticBezierTo(w * 0.50, h * 0.30, w * 0.32, h * 0.16)
-      ..close();
-  }
-
-  Color _lighten(Color c, double amount) {
-    final hsl = HSLColor.fromColor(c);
-    return hsl.withLightness((hsl.lightness + amount).clamp(0.0, 1.0)).toColor();
-  }
-
-  Color _darken(Color c, double amount) {
-    final hsl = HSLColor.fromColor(c);
-    return hsl.withLightness((hsl.lightness - amount).clamp(0.0, 1.0)).toColor();
-  }
-
-  @override
-  bool shouldRepaint(covariant _MiniTopPainter oldDelegate) => oldDelegate.color != color;
-}
-
-class _MiniPantsPainter extends CustomPainter {
-  final Color color;
-  const _MiniPantsPainter(this.color);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final shadow = Paint()
-      ..color = Colors.black.withOpacity(0.10)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
-
-    final path = _pantsPath(size);
-    canvas.save();
-    canvas.translate(0, 6);
-    canvas.drawPath(path, shadow);
-    canvas.restore();
-
-    final fill = Paint()
-      ..shader = LinearGradient(
-        colors: [_lighten(color, 0.10), color, _darken(color, 0.12)],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ).createShader(Offset.zero & size);
-    canvas.drawPath(path, fill);
-
-    final seam = Paint()
-      ..color = Colors.white.withOpacity(0.18)
-      ..strokeWidth = 2
-      ..strokeCap = StrokeCap.round;
-    canvas.drawLine(Offset(size.width * 0.50, size.height * 0.22), Offset(size.width * 0.50, size.height * 0.92), seam);
-  }
-
-  Path _pantsPath(Size s) {
-    final w = s.width;
-    final h = s.height;
-    return Path()
-      ..moveTo(w * 0.20, h * 0.08)
-      ..lineTo(w * 0.80, h * 0.08)
-      ..quadraticBezierTo(w * 0.86, h * 0.08, w * 0.86, h * 0.18)
-      ..lineTo(w * 0.72, h * 0.94)
-      ..lineTo(w * 0.55, h * 0.94)
-      ..lineTo(w * 0.50, h * 0.31)
-      ..lineTo(w * 0.45, h * 0.94)
-      ..lineTo(w * 0.28, h * 0.94)
-      ..lineTo(w * 0.14, h * 0.18)
-      ..quadraticBezierTo(w * 0.14, h * 0.08, w * 0.20, h * 0.08)
-      ..close();
-  }
-
-  Color _lighten(Color c, double amount) {
-    final hsl = HSLColor.fromColor(c);
-    return hsl.withLightness((hsl.lightness + amount).clamp(0.0, 1.0)).toColor();
-  }
-
-  Color _darken(Color c, double amount) {
-    final hsl = HSLColor.fromColor(c);
-    return hsl.withLightness((hsl.lightness - amount).clamp(0.0, 1.0)).toColor();
-  }
-
-  @override
-  bool shouldRepaint(covariant _MiniPantsPainter oldDelegate) => oldDelegate.color != color;
-}
 
 class _Card extends StatelessWidget {
   final Widget child;
@@ -4924,7 +5142,7 @@ class _InventoryPageState extends State<InventoryPage> {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 16, 18, 0),
+          padding: const EdgeInsets.fromLTRB(18, 60, 18, 0),
           child: Column(
             children: [
               Padding(
@@ -5042,12 +5260,16 @@ class _InventoryPageState extends State<InventoryPage> {
                       )
                     : ListView.separated(
                         physics: const BouncingScrollPhysics(),
+                        cacheExtent: 0,
                         padding: const EdgeInsets.fromLTRB(0, 8, 0, 92),
                         itemCount: items.length,
                         separatorBuilder: (_, __) =>
                             const SizedBox(height: 8),
                         itemBuilder: (context, index) {
-                          return _InventoryRowCard(item: items[index]);
+                          return _InventoryRowCard(
+                            key: ValueKey<String>('inventory-row-${items[index].id}'),
+                            item: items[index],
+                          );
                         },
                       ),
               ),
@@ -5163,7 +5385,10 @@ class _InventoryFilterChip extends StatelessWidget {
 class _InventoryRowCard extends StatelessWidget {
   final WardrobeItem item;
 
-  const _InventoryRowCard({required this.item});
+  const _InventoryRowCard({
+    super.key,
+    required this.item,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -5200,32 +5425,12 @@ class _InventoryRowCard extends StatelessWidget {
               SizedBox(
                 width: 74,
                 height: 74,
-                child: Center(
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      Container(
-                        width: 42,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(999),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.16),
-                              blurRadius: 10,
-                              spreadRadius: 0.5,
-                            ),
-                          ],
-                        ),
-                      ),
-                      Transform.translate(
-                        offset: const Offset(0, -2),
-                        child: _ClothingPreviewCard(
-                          category: item.category,
-                          color: item.color,
-                        ),
-                      ),
-                    ],
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: _ClothingModelThumbnail(
+                    key: ValueKey<String>('inventory-3d-${item.id}'),
+                    item: item,
+                    fallback: const _ModelPreviewFallback(size: 28),
                   ),
                 ),
               ),
@@ -5350,29 +5555,11 @@ class _InventoryDetailSheet extends StatelessWidget {
                       color: const Color(0xFFF1ECE5),
                       borderRadius: BorderRadius.circular(24),
                     ),
-                    child: Center(
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Container(
-                            width: 56,
-                            height: 56,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: RadialGradient(
-                                colors: [
-                                  item.color.withOpacity(0.18),
-                                  item.color.withOpacity(0.05),
-                                ],
-                              ),
-                            ),
-                          ),
-                          _ClothingPreviewCard(
-                            category: item.category,
-                            color: item.color,
-                          ),
-                        ],
-                      ),
+                    clipBehavior: Clip.antiAlias,
+                    child: _ClothingModelThumbnail(
+                      key: ValueKey<String>('inventory-detail-3d-${item.id}'),
+                      item: item,
+                      fallback: const _ModelPreviewFallback(size: 30),
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -5573,7 +5760,10 @@ class _WeatherDetailPageState extends State<WeatherDetailPage> {
     await refreshed;
   }
 
-  List<int> _remainingTodayIndexes(Map<String, dynamic> hourly, String currentTime) {
+  List<int> _next24HourIndexes(
+    Map<String, dynamic> hourly,
+    String currentTime,
+  ) {
     final times = List<String>.from(hourly['time'] as List);
     final now = DateTime.parse(currentTime);
     final indexes = <int>[];
@@ -5581,16 +5771,14 @@ class _WeatherDetailPageState extends State<WeatherDetailPage> {
     for (int i = 0; i < times.length; i++) {
       final time = DateTime.parse(times[i]);
 
-      final sameDay = time.year == now.year &&
-          time.month == now.month &&
-          time.day == now.day;
-
-      if (sameDay && !time.isBefore(now)) {
+      if (!time.isBefore(now)) {
         indexes.add(i);
       }
+
+      if (indexes.length == 24) break;
     }
 
-    return indexes.take(8).toList();
+    return indexes;
   }
 
   String _buildClothingAdvice({
@@ -5630,7 +5818,7 @@ class _WeatherDetailPageState extends State<WeatherDetailPage> {
     }
 
     if (tempSwing >= 6) {
-      return 'The temperature may shift today. A light layer would help if conditions change.';
+      return 'The temperature may shift over the next 24 hours. A light layer would help if conditions change.';
     }
 
     if (maxWind >= 28) {
@@ -5645,7 +5833,7 @@ class _WeatherDetailPageState extends State<WeatherDetailPage> {
       return 'It is chilly today. Choose warmer layers before heading out.';
     }
 
-    return 'Weather looks steady today. Your outfit should be comfortable without extra preparation.';
+    return 'Weather looks steady over the next 24 hours. Your outfit should be comfortable without extra preparation.';
   }
 
   @override
@@ -5739,7 +5927,7 @@ class _WeatherDetailPageState extends State<WeatherDetailPage> {
                     final isDay = current['is_day'] as int;
                     final time = current['time'] as String;
 
-                    final indexes = _remainingTodayIndexes(hourly, time);
+                    final indexes = _next24HourIndexes(hourly, time);
 
                     final advice = _buildClothingAdvice(
                       currentTemp: temp,
@@ -5853,7 +6041,7 @@ class _WeatherDetailPageState extends State<WeatherDetailPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Text(
-                                'Today’s forecast',
+                                'Next 24 hours',
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w900,
@@ -5899,7 +6087,7 @@ class _HourlyForecastRow extends StatelessWidget {
 
     if (indexes.isEmpty) {
       return const Text(
-        'No more hourly forecast data available for today.',
+        'Hourly forecast data is unavailable right now.',
         style: TextStyle(
           color: AppColors.textMuted,
           fontWeight: FontWeight.w600,
@@ -6066,20 +6254,25 @@ class _UploadPageState extends State<UploadPage> {
 
     final file = await _picker.pickImage(
       source: source,
-      imageQuality: 88,
+      imageQuality: 92,
     );
 
-    if (!mounted) return;
+    if (!mounted || file == null) return;
 
-    if (file != null) {
-      setState(() {
-        if (_pickingFront) {
-          _frontImage = file;
-        } else {
-          _backImage = file;
-        }
-      });
-    }
+    final accepted = await _reviewPickedImage(
+      file: file,
+      front: _pickingFront,
+    );
+
+    if (!mounted || !accepted) return;
+
+    setState(() {
+      if (_pickingFront) {
+        _frontImage = file;
+      } else {
+        _backImage = file;
+      }
+    });
   } catch (_) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -6091,6 +6284,232 @@ class _UploadPageState extends State<UploadPage> {
         _isPicking = false;
       });
     }
+  }
+}
+
+Future<bool> _reviewPickedImage({
+  required XFile file,
+  required bool front,
+}) async {
+  final result = await showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+    barrierColor: Colors.black.withOpacity(0.42),
+    builder: (dialogContext) {
+      return Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+        backgroundColor: Colors.transparent,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 420),
+          padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF9FAF8),
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.12),
+                blurRadius: 34,
+                offset: const Offset(0, 16),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(22),
+                child: AspectRatio(
+                  aspectRatio: 1.0,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Container(color: const Color(0xFF151817)),
+                      Center(
+                        child: Image.network(
+                          file.path,
+                          fit: BoxFit.contain,
+                          alignment: Alignment.center,
+                          filterQuality: FilterQuality.high,
+                          errorBuilder: (_, __, ___) => const Center(
+                            child: Icon(
+                              Icons.image_not_supported_outlined,
+                              color: Colors.white70,
+                              size: 42,
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        top: 12,
+                        right: 12,
+                        child: Material(
+                          color: Colors.black.withOpacity(0.28),
+                          shape: const CircleBorder(),
+                          child: InkWell(
+                            customBorder: const CircleBorder(),
+                            onTap: () => Navigator.pop(dialogContext, false),
+                            child: const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Icon(
+                                Icons.close_rounded,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.textDark,
+                        minimumSize: const Size.fromHeight(46),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
+                          side: BorderSide(
+                            color: Colors.black.withOpacity(0.08),
+                          ),
+                        ),
+                      ),
+                      child: const Text(
+                        'Retake',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(dialogContext, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        minimumSize: const Size.fromHeight(46),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                      ),
+                      child: const Text(
+                        'Use photo',
+                        style: TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+
+  return result ?? false;
+}
+
+Future<void> _showCaptureGuide({
+  required bool front,
+  required ImageSource source,
+}) async {
+  final continueCapture = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    barrierColor: Colors.black.withOpacity(0.30),
+    builder: (sheetContext) {
+      return SafeArea(
+        top: false,
+        child: Container(
+          margin: const EdgeInsets.only(top: 32),
+          padding: const EdgeInsets.fromLTRB(18, 14, 18, 22),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(32),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.10),
+                blurRadius: 30,
+                offset: const Offset(0, -8),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 42,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+              const SizedBox(height: 14),
+              AspectRatio(
+                aspectRatio: 1.0,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(28),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Container(
+                        color: const Color(0xFF161B19),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton.icon(
+                  onPressed: () => Navigator.pop(sheetContext, true),
+                  icon: Icon(
+                    source == ImageSource.camera
+                        ? Icons.camera_alt_outlined
+                        : Icons.photo_library_outlined,
+                    size: 20,
+                  ),
+                  label: Text(
+                    source == ImageSource.camera
+                        ? 'Continue to camera'
+                        : 'Choose photo',
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(17),
+                    ),
+                    textStyle: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+
+  if (continueCapture == true && mounted) {
+    await _pickImage(source);
   }
 }
 
@@ -6160,7 +6579,10 @@ void _showImageSourceSheet({required bool front}) {
                 icon: Icons.photo_library_outlined,
                 onTap: () {
                   Navigator.pop(context);
-                  _pickImage(ImageSource.gallery);
+                  _showCaptureGuide(
+                    front: front,
+                    source: ImageSource.gallery,
+                  );
                 },
               ),
 
@@ -6172,7 +6594,10 @@ void _showImageSourceSheet({required bool front}) {
                 icon: Icons.camera_alt_outlined,
                 onTap: () {
                   Navigator.pop(context);
-                  _pickImage(ImageSource.camera);
+                  _showCaptureGuide(
+                    front: front,
+                    source: ImageSource.camera,
+                  );
                 },
               ),
             ],
@@ -6279,18 +6704,22 @@ Widget _buildSidePhotoCard({
                 ? Stack(
                     fit: StackFit.expand,
                     children: [
-                      Image.network(
-                        image.path,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) {
-                          return const Center(
-                            child: Icon(
-                              Icons.image_rounded,
-                              color: AppColors.primary,
-                              size: 42,
-                            ),
-                          );
-                        },
+                      Center(
+                        child: Image.network(
+                          image.path,
+                          fit: BoxFit.contain,
+                          alignment: Alignment.center,
+                          filterQuality: FilterQuality.high,
+                          errorBuilder: (_, __, ___) {
+                            return const Center(
+                              child: Icon(
+                                Icons.image_rounded,
+                                color: AppColors.primary,
+                                size: 42,
+                              ),
+                            );
+                          },
+                        ),
                       ),
                       Positioned(
                         top: 8,
@@ -6370,7 +6799,7 @@ Widget _buildSidePhotoCard({
         bottom: false,
         child: SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 120),
+          padding: const EdgeInsets.fromLTRB(24, 64, 24, 120),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -6476,7 +6905,6 @@ Widget _buildSidePhotoCard({
                     ),
 
                     const SizedBox(height: 16),
-
 
 
 _SetupStatusRow(

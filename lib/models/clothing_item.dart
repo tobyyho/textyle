@@ -9,7 +9,6 @@ class ClothingItem {
   final String? originalImagePath;
   final String? inventoryRenderPath;
   final String? avatarRenderPath;
-
   final bool isProcessed;
 
   const ClothingItem({
@@ -44,8 +43,4 @@ class ClothingItem {
       isProcessed: isProcessed ?? this.isProcessed,
     );
   }
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> 61ca8ef54504e46b134879ab06352777881774b1
