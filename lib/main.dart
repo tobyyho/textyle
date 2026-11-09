@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:html' as html;
 import 'dart:ui';
 import 'dart:ui_web' as ui_web;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
@@ -12,6 +13,17 @@ import 'package:provider/provider.dart';
 
 import 'models/clothing_item.dart';
 import 'models/inventory_store.dart';
+import 'models/outfit_store.dart';
+import 'models/outfit_activity_store.dart';
+import 'services/garment_media_store.dart';
+import 'services/web_garment_media_store.dart';
+import 'services/web_inventory_persistence.dart';
+import 'services/web_outfit_persistence.dart';
+import 'services/web_outfit_activity_persistence.dart';
+import 'screens/tailor_garment_flow.dart';
+import 'screens/toby_garment_actions.dart';
+import 'screens/toby_outfit_tools.dart';
+import 'screens/toby_backup_page.dart';
 
 void main() {
   FlutterError.onError = (FlutterErrorDetails details) {
@@ -23,7 +35,26 @@ void main() {
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => InventoryStore()),
+        Provider<GarmentMediaStore>(create: (_) => WebGarmentMediaStore()),
+        ChangeNotifierProvider(
+          create: (context) => InventoryStore(
+            mediaStore: context.read<GarmentMediaStore>(),
+            persistence: WebInventoryPersistence(),
+            initialItems: kDemoWardrobeItems.map((item) => item.toCanonicalItem()),
+          )..load(),
+        ),
+        ChangeNotifierProvider(
+          create: (context) => OutfitStore(
+            inventory: context.read<InventoryStore>(),
+            persistence: WebOutfitPersistence(),
+          )..load(),
+        ),
+        ChangeNotifierProvider(
+          create: (context) => OutfitActivityStore(
+            outfits: context.read<OutfitStore>(),
+            persistence: WebOutfitActivityPersistence(),
+          )..load(),
+        ),
         ChangeNotifierProvider(create: (_) => AvatarSettings()),
       ],
       child: const TextyleApp(),
@@ -1649,17 +1680,17 @@ class MainScaffold extends StatefulWidget {
 class _MainScaffoldState extends State<MainScaffold> {
   int index = 1;
   late final PageController _pageController;
-
-  late final List<Widget> pages = const [
-    InventoryPage(),
-    HomePage(),
-    UploadPage(),
-  ];
+  late final List<Widget> pages;
 
   @override
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: index);
+    pages = [
+      const InventoryPage(),
+      const HomePage(),
+      UploadPage(onSaved: () => _goToPage(0)),
+    ];
   }
 
   @override
@@ -1878,6 +1909,61 @@ class WardrobeItem {
     this.availableForFemale = true,
   });
 
+  factory WardrobeItem.fromCanonical(ClothingItem item) {
+    final raw = item.colorLabel.replaceFirst('#', '');
+    final parsed = int.tryParse(raw, radix: 16);
+    final colorValue = parsed == null
+        ? 0xFF9E9E9E
+        : raw.length == 6 ? 0xFF000000 | parsed : parsed;
+    return WardrobeItem(
+      id: item.id,
+      label: item.name,
+      category: item.type == ClothingType.top
+          ? ClosetCategory.tops : ClosetCategory.bottoms,
+      color: Color(colorValue),
+      // The canonical garment has no per-item wash timestamp. Never invent
+      // "today" history for a newly uploaded or restored garment.
+      lastWornDays: -1,
+      lastWashedDays: -1,
+      notes: item.classification.source == DataSource.tailor
+          ? 'Classified by Tailor' : 'Added to wardrobe',
+      wears: 0,
+      season: item.attributes.seasons.isEmpty
+          ? 'Not set' : item.attributes.seasons.map(enumWire).join(', '),
+      overlayAsset: item.media.frontOriginal,
+    );
+  }
+
+  ClothingItem toCanonicalItem() {
+    final created = DateTime.utc(2026, 1, 1);
+    final role = category == ClosetCategory.tops
+        ? LayerRole.top : LayerRole.bottom;
+    final male = availableForMale ? modelAssetFor(AvatarBodyType.male) : null;
+    final female = availableForFemale ? modelAssetFor(AvatarBodyType.female) : null;
+    return ClothingItem(
+      id: id,
+      name: label,
+      colorLabel: '#${color.value.toRadixString(16).padLeft(8, '0')}',
+      source: GarmentSource(type: GarmentSourceType.catalogue,
+          createdAt: created, updatedAt: created),
+      classification: const GarmentClassification(
+          category: GarmentCategory.unknown,
+          userConfirmed: false, source: DataSource.catalogue),
+      attributes: GarmentAttributes(
+          primaryColor: '#${color.value.toRadixString(16).padLeft(8, '0')}',
+          layerRole: role),
+      digital3D: Digital3DAsset(
+          status: modelFileName == null ? AssetStatus.notGenerated : AssetStatus.ready,
+          format: modelFileName == null ? null : 'glb',
+          assetUrl: male ?? female),
+      bodyCompatibility: BodyCompatibility(
+          canonicalProfiles: [if (male != null) 'male_average',
+              if (female != null) 'female_average'],
+          fitVariants: {if (male != null) 'male_average': male,
+              if (female != null) 'female_average': female}),
+    );
+  }
+
 
   bool isAvailableFor(AvatarBodyType bodyType) {
     return bodyType == AvatarBodyType.female
@@ -1906,6 +1992,7 @@ class WardrobeItem {
     }
   }
   String get lastWornLabel {
+  if (lastWornDays < 0) return 'Wear history not recorded';
   if (lastWornDays == 0) return 'Worn today';
   if (lastWornDays == 1) return 'Worn yesterday';
   if (lastWornDays < 7) return 'Worn $lastWornDays days ago';
@@ -1920,6 +2007,7 @@ class WardrobeItem {
 }
 
 String get lastWashedLabel {
+  if (lastWashedDays < 0) return 'Wash history not recorded';
   if (lastWashedDays == 0) return 'Washed today';
   if (lastWashedDays == 1) return 'Washed yesterday';
   if (lastWashedDays < 7) return 'Washed $lastWashedDays days ago';
@@ -2182,8 +2270,10 @@ const List<WardrobeItem> kDemoWardrobeItems = [
   ),
 ];
 
-List<WardrobeItem> wardrobeItemsFor(AvatarBodyType bodyType) {
-  return kDemoWardrobeItems
+List<WardrobeItem> wardrobeItemsFor(
+    InventoryStore inventory, AvatarBodyType bodyType) {
+  final catalogue = {for (final item in kDemoWardrobeItems) item.id: item};
+  return inventory.items.map((item) => catalogue[item.id] ?? WardrobeItem.fromCanonical(item))
       .where((item) => item.isAvailableFor(bodyType))
       .toList(growable: false);
 }
@@ -2232,7 +2322,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _loadFavouritesForBody(AvatarBodyType bodyType) {
-    final availableItems = wardrobeItemsFor(bodyType);
+    final availableItems = wardrobeItemsFor(context.read<InventoryStore>(), bodyType);
     final itemsById = <String, WardrobeItem>{
       for (final item in availableItems) item.id: item,
     };
@@ -2561,7 +2651,7 @@ class _HomePageState extends State<HomePage> {
 
   List<WardrobeItem> get visibleItems {
     final bodyType = context.read<AvatarSettings>().bodyType;
-    return wardrobeItemsFor(bodyType)
+    return wardrobeItemsFor(context.watch<InventoryStore>(), bodyType)
         .where((item) => item.category == selectedCategory)
         .toList();
   }
@@ -2720,6 +2810,8 @@ Widget build(BuildContext context) {
   selectedBottom: selectedBottom,
   onSelectItem: _selectItem,
 ),
+            const SizedBox(height: 20),
+            const TobyOutfitTools(),
           ],
         ),
       ),
@@ -3012,6 +3104,13 @@ const SizedBox(height: 18),
                 _ProfileSection(
                   title: 'Preferences',
                   children: [
+                    _ProfileInfoTile(
+                      icon: Icons.backup_outlined,
+                      title: 'Backup & restore',
+                      subtitle: 'Export or restore local wardrobe data',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(builder: (_) => const TobyBackupPage())),
+                    ),
                     _ProfileInfoTile(
                       icon: Icons.notifications_none_rounded,
                       title: 'Notifications',
@@ -3705,7 +3804,7 @@ class _SelectedPiecesRow extends StatelessWidget {
     required String title,
   }) {
     final bodyType = context.read<AvatarSettings>().bodyType;
-    final items = wardrobeItemsFor(bodyType)
+    final items = wardrobeItemsFor(context.watch<InventoryStore>(), bodyType)
         .where((item) => item.category == category)
         .toList();
 
@@ -4468,6 +4567,18 @@ class _ClothingModelThumbnailState extends State<_ClothingModelThumbnail> {
   @override
   Widget build(BuildContext context) {
     if (_viewType == null) {
+      final reference = widget.item.overlayAsset;
+      if (reference != null && reference.startsWith('indexeddb://')) {
+        return FutureBuilder<Uint8List?>(
+          future: context.read<GarmentMediaStore>().get(reference),
+          builder: (context, snapshot) {
+            final bytes = snapshot.data;
+            if (bytes == null) return Center(child: widget.fallback);
+            return Image.memory(bytes, fit: BoxFit.contain,
+                gaplessPlayback: true);
+          },
+        );
+      }
       return Center(child: widget.fallback);
     }
 
@@ -4653,6 +4764,7 @@ class _ClothingInfoSheet extends StatelessWidget {
                 ),
               ),
             ),
+            TobyGarmentActions(item.id),
           ],
         ),
       ),
@@ -4788,7 +4900,8 @@ class _InventoryPageState extends State<InventoryPage> {
   List<WardrobeItem> get _filteredItems {
     final q = _query.trim().toLowerCase();
     List<WardrobeItem> items = [
-      ...wardrobeItemsFor(context.watch<AvatarSettings>().bodyType),
+      ...wardrobeItemsFor(context.watch<InventoryStore>(),
+          context.watch<AvatarSettings>().bodyType),
     ];
 
     switch (_selectedFilter) {
@@ -4858,7 +4971,8 @@ class _InventoryPageState extends State<InventoryPage> {
 
   bool _hasResultsFor(InventoryFilter filter) {
     final items = [
-      ...wardrobeItemsFor(context.read<AvatarSettings>().bodyType),
+      ...wardrobeItemsFor(context.read<InventoryStore>(),
+          context.read<AvatarSettings>().bodyType),
     ];
 
     switch (filter) {
@@ -5529,7 +5643,7 @@ class _InventoryDetailSheet extends StatelessWidget {
       ),
       child: SafeArea(
         top: false,
-        child: Padding(
+        child: SingleChildScrollView(child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 26),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -5651,9 +5765,10 @@ class _InventoryDetailSheet extends StatelessWidget {
                   ),
                 ),
               ),
+              TobyGarmentActions(item.id),
             ],
           ),
-        ),
+        )),
       ),
     );
   }
@@ -6223,7 +6338,8 @@ class _WeatherStat extends StatelessWidget {
 
 /// ---------- Upload ----------
 class UploadPage extends StatefulWidget {
-  const UploadPage({super.key});
+  const UploadPage({super.key, this.onSaved});
+  final VoidCallback? onSaved;
 
   @override
   State<UploadPage> createState() => _UploadPageState();
@@ -6241,9 +6357,7 @@ class _UploadPageState extends State<UploadPage> {
   bool _isScanningRfid = false;
 
   bool get _canSave {
-  return _frontImage != null &&
-      _backImage != null &&
-      _pairedRfidTag != null;
+  return _frontImage != null && _backImage != null;
 }
 
   Future<void> _pickImage(ImageSource source) async {
@@ -6636,41 +6750,26 @@ void _showImageSourceSheet({required bool front}) {
     });
   }
 
-ClothingType _detectClothingType() {
-  return ClothingType.top;
-}
-
-  void _savePickedItem() {
+  Future<void> _savePickedItem() async {
     if (!_canSave) return;
-
-    final fileName = _frontImage!.name;
-    final dotIndex = fileName.lastIndexOf('.');
-    final displayName =
-        dotIndex > 0 ? fileName.substring(0, dotIndex) : fileName;
-
-    context.read<InventoryStore>().addItem(
-          ClothingItem(
-            id: DateTime.now().millisecondsSinceEpoch.toString(),
-            type: _detectClothingType(),
-            name: displayName.isEmpty ? 'New Item' : displayName,
-            colorLabel: 'RFID: $_pairedRfidTag',
-            originalImagePath: _frontImage!.path,
-          ),
-        );
-    // );
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Item saved to closet + hardware'),
-        duration: Duration(milliseconds: 1000),
+    final saved = await Navigator.of(context).push(MaterialPageRoute<bool>(
+      builder: (_) => TailorGarmentFlow(
+        initialFrontImage: _frontImage,
+        initialBackImage: _backImage,
+        initialCaptureMode: GarmentCaptureMode.controlledEnrollment,
+        promptedControlled: true,
+        returnAfterSave: true,
       ),
-    );
-
-    setState(() {
-  _frontImage = null;
-  _backImage = null;
-  _pairedRfidTag = null;
-});
+    ));
+    if (!mounted) return;
+    if (saved == true) {
+      setState(() {
+        _frontImage = null;
+        _backImage = null;
+        _pairedRfidTag = null;
+      });
+      widget.onSaved?.call();
+    }
   }
 
 Widget _buildSidePhotoCard({
@@ -6896,7 +6995,7 @@ Widget _buildSidePhotoCard({
                     const SizedBox(height: 6),
 
                     const Text(
-                      'Connect this item to the physical closet.',
+                      'Review both photos and garment details. RFID pairing is a simulated preview.',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -6965,14 +7064,12 @@ const SizedBox(height: 16),
                         ),
                         child: Text(
                         _canSave
-    ? 'Save to closet + hardware'
+    ? 'Continue to garment review'
     : !hasFrontImage
         ? 'Add front photo first'
         : !hasBackImage
             ? 'Add back photo first'
-            : !hasRfid
-                ? 'Pair RFID tag first'
-                : 'Save to closet + hardware',
+            : 'Continue to garment review',
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w900,
