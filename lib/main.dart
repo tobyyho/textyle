@@ -3,36 +3,229 @@ import 'dart:convert';
 import 'dart:html' as html;
 import 'dart:ui';
 import 'dart:ui_web' as ui_web;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as supa;
+import 'services/cloud_config.dart';
+import 'services/cloud_account.dart';
+import 'services/wardrobe_account.dart';
+import 'services/preview_account.dart';
+import 'services/automatic_template_registry.dart';
+import 'widgets/garment_preview_toolbar.dart';
+import 'services/tailor_session.dart';
+import 'screens/account_password_page.dart';
 
 import 'models/clothing_item.dart';
 import 'models/inventory_store.dart';
+import 'services/wardrobe_adapter.dart';
+import 'services/garment_presentation.dart';
+import 'services/garment_photo_picker.dart';
+import 'services/web_model_url.dart';
+import 'models/outfit_store.dart';
+import 'models/outfit_activity_store.dart';
+import 'services/garment_media_store.dart';
+import 'screens/automatic_garment_upload_page.dart';
+import 'screens/toby_garment_actions.dart';
+import 'screens/toby_outfit_tools.dart';
+import 'widgets/thread_messenger.dart';
 
-void main() {
-  FlutterError.onError = (FlutterErrorDetails details) {
-    FlutterError.presentError(details);
-    debugPrint(details.exceptionAsString());
-    debugPrint(details.stack.toString());
-  };
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  String? error;
+  if (!CloudConfig.configured) {
+    error = 'Cloud accounts are not configured. Start textyle using the supplied run_cloud.py after connecting your project.';
+  } else {
+    try { await supa.Supabase.initialize(url: CloudConfig.url, publishableKey: CloudConfig.publishableKey); }
+    catch (_) { error = 'Could not connect to cloud accounts. Check your project configuration and restart textyle.'; }
+  }
+  if (PreviewSession.enabled && const bool.fromEnvironment('TEXTYLE_START_PREVIEW')) {
+    PreviewSession.instance.signIn('username', 'password');
+  }
+  runApp(_AccountApplication(setupError: error));
+}
 
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => InventoryStore()),
-        ChangeNotifierProvider(create: (_) => AvatarSettings()),
-      ],
-      child: const TextyleApp(),
-    ),
-  );
+class _AccountApplication extends StatefulWidget {
+  const _AccountApplication({this.setupError});
+  final String? setupError;
+  @override
+  State<_AccountApplication> createState() => _AccountApplicationState();
+}
+class _AccountApplicationState extends State<_AccountApplication> {
+  StreamSubscription<supa.AuthState>? _authEvents;
+  String? _userId;
+  bool _recovering = false;
+  @override
+  void initState() {
+    super.initState();
+    PreviewSession.instance.addListener(_previewChanged);
+    if (widget.setupError != null) return;
+    _userId = supa.Supabase.instance.client.auth.currentUser?.id;
+    _authEvents = supa.Supabase.instance.client.auth.onAuthStateChange.listen((state) {
+      if (!mounted) return;
+      final next = state.session?.user.id;
+      if (next != _userId) {
+        clearBrowserModelUrls();
+        TailorSession.disconnect();
+      }
+      setState(() {
+        _userId = next;
+        if (state.event == supa.AuthChangeEvent.passwordRecovery) _recovering = true;
+        if (next == null) _recovering = false;
+      });
+    });
+  }
+  void _previewChanged() {
+    clearBrowserModelUrls();
+    TailorSession.disconnect();
+    if (mounted) setState(() {});
+  }
+  @override
+  void dispose() {
+    PreviewSession.instance.removeListener(_previewChanged);
+    _authEvents?.cancel();
+    super.dispose();
+  }
+  @override
+  Widget build(BuildContext context) {
+    final preview = PreviewSession.instance.account;
+    if (preview != null) return _PreviewWardrobe(key: ObjectKey(preview), account: preview);
+    if (widget.setupError != null) return TextyleApp(home: Scaffold(
+      body: Center(child: Padding(padding: const EdgeInsets.all(32), child: Text(widget.setupError!, textAlign: TextAlign.center)))));
+    if (_recovering) return TextyleApp(key: const ValueKey('password-recovery'),
+      home: AccountPasswordPage(onSaved: () => setState(() => _recovering = false)));
+    if (_userId == null) return const TextyleApp(key: ValueKey('signed-out'));
+    return _AccountWardrobe(key: ValueKey('account-$_userId'), userId: _userId!);
+  }
+}
+
+class _PreviewWardrobe extends StatefulWidget {
+  const _PreviewWardrobe({super.key, required this.account});
+  final PreviewAccount account;
+  @override
+  State<_PreviewWardrobe> createState() => _PreviewWardrobeState();
+}
+
+class _PreviewWardrobeState extends State<_PreviewWardrobe> {
+  final _media = PreviewGarmentMediaStore();
+  late final InventoryStore _inventory;
+  late final OutfitStore _outfits;
+  late final OutfitActivityStore _activity;
+  final _avatar = AvatarSettings();
+  @override
+  void initState() {
+    super.initState();
+    _inventory = InventoryStore(initialItems: previewGarments(),
+        mediaStore: _media, persistence: widget.account.document('inventory'));
+    _outfits = OutfitStore(inventory: _inventory,
+        persistence: widget.account.document('outfits'));
+    _activity = OutfitActivityStore(outfits: _outfits,
+        persistence: widget.account.document('activity'));
+  }
+  @override
+  void dispose() {
+    _activity.dispose(); _outfits.dispose(); _inventory.dispose(); _avatar.dispose();
+    _media.values.clear();
+    super.dispose();
+  }
+  @override
+  Widget build(BuildContext context) => MultiProvider(providers: [
+    Provider<WardrobeAccount>.value(value: widget.account),
+    Provider<GarmentMediaStore>.value(value: _media),
+    ChangeNotifierProvider<InventoryStore>.value(value: _inventory),
+    ChangeNotifierProvider<OutfitStore>.value(value: _outfits),
+    ChangeNotifierProvider<OutfitActivityStore>.value(value: _activity),
+    ChangeNotifierProvider<AvatarSettings>.value(value: _avatar),
+  ], child: const TextyleApp(home: MainScaffold()));
+}
+
+class _AccountWardrobe extends StatefulWidget {
+  const _AccountWardrobe({super.key, required this.userId});
+  final String userId;
+  @override
+  State<_AccountWardrobe> createState() => _AccountWardrobeState();
+}
+class _AccountWardrobeState extends State<_AccountWardrobe> {
+  late CloudAccount _account;
+  late CloudGarmentMediaStore _media;
+  InventoryStore? _inventory;
+  OutfitStore? _outfits;
+  OutfitActivityStore? _activity;
+  AvatarSettings? _avatar;
+  bool _ready = false;
+  String? _error;
+  @override
+  void initState() { super.initState(); _load(); }
+  Future<void> _load() async {
+    _disposeStores();
+    _account = CloudAccount(supa.Supabase.instance.client, widget.userId);
+    _media = CloudGarmentMediaStore(_account);
+    try {
+      // Finish authenticated reads before building any wardrobe screens. A
+      // network/schema failure must never masquerade as a new empty wardrobe.
+      await Future.wait(['inventory','outfits','activity','profile','favourites_male','favourites_female']
+        .map((kind) => _account.document(kind).read()));
+      _account.scope.check();
+      if (!mounted) return;
+      final rawProfile = await _account.document('profile').read();
+      final profile = rawProfile == null ? <String,dynamic>{} : jsonDecode(rawProfile) as Map<String,dynamic>;
+      final avatarName = profile['avatar'] ?? supa.Supabase.instance.client.auth.currentUser?.userMetadata?['avatar'];
+      _avatar = AvatarSettings(initialBodyType: avatarName == 'female' ? AvatarBodyType.female : AvatarBodyType.male,
+        onChanged: (type) => _account.document('profile').write(jsonEncode({'avatar':type.name})));
+      _inventory = InventoryStore(initialItems: const [], mediaStore: _media, persistence: _account.document('inventory'));
+      _outfits = OutfitStore(inventory: _inventory!, persistence: _account.document('outfits'));
+      _activity = OutfitActivityStore(outfits: _outfits!, persistence: _account.document('activity'));
+      await _inventory!.load(); await _outfits!.load(); await _activity!.load();
+      if (mounted) setState(() { _ready = true; _error = null; });
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Could not load your wardrobe. Check your connection and try again. Your saved clothing has not been replaced.');
+    }
+  }
+  void _disposeStores() {
+    _activity?.dispose(); _outfits?.dispose(); _inventory?.dispose(); _avatar?.dispose();
+    _activity = null; _outfits = null; _inventory = null; _avatar = null;
+  }
+  @override
+  void dispose() { _media.clear(); _disposeStores(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    if (!_ready) return TextyleApp(home: Scaffold(body: Center(child: Padding(
+      padding: const EdgeInsets.all(28), child: Column(mainAxisSize: MainAxisSize.min, children: [
+        if (_error == null) const CircularProgressIndicator(),
+        const SizedBox(height: 20), Text(_error ?? 'Loading your wardrobe…', textAlign: TextAlign.center),
+        if (_error != null) ...[
+          TextButton(onPressed: () { setState(() => _error = null); _load(); }, child: const Text('Try again')),
+          TextButton(onPressed: () => supa.Supabase.instance.client.auth.signOut(), child: const Text('Log out')),
+        ],
+      ])))));
+    return MultiProvider(providers: [
+      Provider<WardrobeAccount>.value(value: _account),
+      Provider<GarmentMediaStore>.value(value: _media),
+      ChangeNotifierProvider<InventoryStore>.value(value: _inventory!),
+      ChangeNotifierProvider<OutfitStore>.value(value: _outfits!),
+      ChangeNotifierProvider<OutfitActivityStore>.value(value: _activity!),
+      ChangeNotifierProvider<AvatarSettings>.value(value: _avatar!),
+    ], child: TextyleApp(key: ValueKey('wardrobe-${widget.userId}'), home: const MainScaffold()));
+  }
+}
+
+Future<void> _signOutAccount(BuildContext context) async {
+  if (PreviewSession.instance.active) {
+    PreviewSession.instance.signOut();
+    return;
+  }
+  try { await supa.Supabase.instance.client.auth.signOut(); }
+  catch (_) { if (context.mounted) ThreadMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Could not log out. Please try again.'))); }
 }
 
 class TextyleApp extends StatelessWidget {
-  const TextyleApp({super.key});
+  const TextyleApp({super.key, this.home});
+  final Widget? home;
 
   @override
   Widget build(BuildContext context) {
@@ -58,7 +251,7 @@ class TextyleApp extends StatelessWidget {
               displayColor: AppColors.textDark,
             ),
       ),
-      home: const AuthPage(),
+      home: home ?? const AuthPage(),
     );
   }
 }
@@ -88,7 +281,11 @@ enum AvatarBodyType {
 }
 
 class AvatarSettings extends ChangeNotifier {
-  AvatarBodyType _bodyType = AvatarBodyType.male;
+  AvatarSettings({AvatarBodyType initialBodyType = AvatarBodyType.male, this.onChanged}) : _bodyType = initialBodyType;
+  final Future<void> Function(AvatarBodyType)? onChanged;
+  bool _saving = false;
+  bool _disposed = false;
+  AvatarBodyType _bodyType;
 
   AvatarBodyType get bodyType => _bodyType;
 
@@ -101,11 +298,21 @@ class AvatarSettings extends ChangeNotifier {
     }
   }
 
-  void setBodyType(AvatarBodyType type) {
-    if (_bodyType == type) return;
-    _bodyType = type;
-    notifyListeners();
+  Future<bool> setBodyType(AvatarBodyType type) async {
+    if (_bodyType == type) return true;
+    if (_saving || _disposed) return false;
+    _saving = true;
+    try {
+      await onChanged?.call(type);
+      if (_disposed) return false;
+      _bodyType = type;
+      notifyListeners();
+      return true;
+    } catch (_) { return false; }
+    finally { _saving = false; }
   }
+  @override
+  void dispose() { _disposed = true; super.dispose(); }
 }
 
 BoxDecoration appBackground() {
@@ -271,10 +478,8 @@ class AuthPage extends StatefulWidget {
 class _AuthPageState extends State<AuthPage> {
   bool isSignUp = false;
   bool showPassword = false;
-  bool rememberMe = true;
   bool showAuthContent = false;
   bool _isSigningIn = false;
-  bool _signedIn = false;
   AvatarBodyType signUpBodyType = AvatarBodyType.male;
 
   final nameController = TextEditingController();
@@ -294,31 +499,61 @@ class _AuthPageState extends State<AuthPage> {
 
   Future<void> _goToMainApp() async {
     if (_isSigningIn) return;
-
-    FocusScope.of(context).unfocus();
-
-    if (isSignUp) {
-      context.read<AvatarSettings>().setBodyType(signUpBodyType);
+    final email = emailController.text.trim();
+    final password = passwordController.text;
+    if (!isSignUp && PreviewSession.instance.signIn(email, password)) {
+      FocusScope.of(context).unfocus();
+      passwordController.clear();
+      return;
     }
-
-    setState(() {
-      _isSigningIn = true;
-    });
-
-    // Keep the existing clothing-rack loading animation.
+    if (!RegExp(r'^\S+@\S+\.\S+$').hasMatch(email) || password.isEmpty ||
+        isSignUp && (nameController.text.trim().isEmpty || password.length < 8)) {
+      ThreadMessenger.of(context).showSnackBar(const SnackBar(content:
+        Text('Enter a valid email and password. New accounts also need a name and a password of at least 8 characters.')));
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    setState(() => _isSigningIn = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _heroKey.currentState?.startContinuousLoadingScroll();
+      if (mounted) _heroKey.currentState?.startContinuousLoadingScroll();
+    });
+    try {
+      final auth = supa.Supabase.instance.client.auth;
+      if (isSignUp) {
+        final response = await auth.signUp(email: email, password: password,
+          emailRedirectTo: CloudConfig.redirectUrl,
+          data: {'display_name':nameController.text.trim(), 'avatar':signUpBodyType.name});
+        if (response.session == null && mounted) {
+          ThreadMessenger.of(context).showSnackBar(const SnackBar(content:
+            Text('Check your email to confirm your account, then sign in.')));
+          setState(() => isSignUp = false);
+        }
+      } else {
+        await auth.signInWithPassword(email: email, password: password);
       }
-    });
+    } on supa.AuthException catch (e) {
+      if (mounted) ThreadMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (mounted) ThreadMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not connect. Check your internet connection and try again.')));
+    } finally {
+      if (mounted) {
+        _heroKey.currentState?.stopLoadingScroll();
+        passwordController.clear(); setState(() => _isSigningIn = false);
+      }
+    }
+  }
 
-    await Future.delayed(const Duration(seconds: 5));
-    if (!mounted) return;
-
-    // Build exactly one screen: never mount Home beneath the auth page.
-    setState(() {
-      _signedIn = true;
-    });
+  Future<void> _forgotPassword() async {
+    final email = emailController.text.trim();
+    if (!RegExp(r'^\S+@\S+\.\S+$').hasMatch(email)) {
+      ThreadMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter your email address first.')));return;
+    }
+    try {
+      await supa.Supabase.instance.client.auth.resetPasswordForEmail(email, redirectTo: CloudConfig.redirectUrl);
+      if (mounted) ThreadMessenger.of(context).showSnackBar(const SnackBar(content: Text('If an account exists, you will receive a password reset email.')));
+    } catch (_) {
+      if (mounted) ThreadMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not send a reset email. Please try again.')));
+    }
   }
 
   void _switchToSignUp() {
@@ -383,7 +618,7 @@ class _AuthPageState extends State<AuthPage> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Text(
-                      "Username",
+                      PreviewSession.enabled ? "Email or username" : "Email",
                       style: TextStyle(
                         fontSize: 14,
                         color: AppColors.textDark,
@@ -395,12 +630,13 @@ class _AuthPageState extends State<AuthPage> {
                       builder: (fieldContext) {
                         return TextField(
                           controller: emailController,
+                          keyboardType: TextInputType.emailAddress,
                           textInputAction: TextInputAction.next,
                           cursorHeight: 15,
                           cursorColor: AppColors.primary,
                           onTap: () => _ensureFieldVisible(fieldContext),
                           decoration: modernFieldDecoration(
-                            hint: "Enter your username",
+                            hint: PreviewSession.enabled ? "Enter email or preview username" : "Enter your email",
                             prefixIcon: Icons.alternate_email_rounded,
                           ),
                         );
@@ -448,67 +684,9 @@ class _AuthPageState extends State<AuthPage> {
                       },
                     ),
                     const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Transform.scale(
-                              scale: 0.92,
-                              child: Checkbox(
-                                value: rememberMe,
-                                onChanged: (value) {
-                                  setState(() {
-                                    rememberMe = value ?? false;
-                                  });
-                                },
-                                activeColor: AppColors.primary,
-                                fillColor:
-                                    WidgetStateProperty.resolveWith((states) {
-                                  if (states.contains(WidgetState.selected)) {
-                                    return AppColors.primary;
-                                  }
-                                  return Colors.white.withOpacity(0.35);
-                                }),
-                                checkColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(5),
-                                ),
-                                side: BorderSide(
-                                  color: Colors.white.withOpacity(0.72),
-                                  width: 1.0,
-                                ),
-                              ),
-                            ),
-                            const Text(
-                              "Remember me",
-                              style: TextStyle(
-                                color: AppColors.textMuted,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                        TextButton(
-                          onPressed: () {},
-                          style: TextButton.styleFrom(
-                            foregroundColor: AppColors.textMuted,
-                            padding: EdgeInsets.zero,
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          child: const Text(
-                            "Forgot password?",
-                            style: TextStyle(
-                              color: AppColors.primary,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                    Align(alignment: Alignment.centerRight,
+                      child: TextButton(onPressed: _isSigningIn ? null : _forgotPassword,
+                        child: const Text('Forgot password?'))),
                   ],
                 ),
               ),
@@ -601,7 +779,7 @@ class _AuthPageState extends State<AuthPage> {
                     ),
                     const SizedBox(height: 14),
                     const Text(
-                      "Username",
+                      "Your name",
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
@@ -618,7 +796,7 @@ class _AuthPageState extends State<AuthPage> {
                           cursorColor: AppColors.primary,
                           onTap: () => _ensureFieldVisible(fieldContext),
                           decoration: modernFieldDecoration(
-                            hint: "Choose a username",
+                            hint: "Enter your name",
                             prefixIcon: Icons.alternate_email_rounded,
                           ),
                         );
@@ -717,7 +895,7 @@ class _AuthPageState extends State<AuthPage> {
                     ),
                     const SizedBox(height: 4),
                     const Text(
-                      'This chooses which fitted clothing collection the app uses.',
+                      'Choose the avatar used to preview your clothes.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 11.5,
@@ -933,10 +1111,6 @@ Widget _buildAuthButton() {
 
   @override
   Widget build(BuildContext context) {
-    if (_signedIn) {
-      return const MainScaffold();
-    }
-
     final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
 
     return Stack(
@@ -1139,6 +1313,10 @@ class _ClosetHeroHeaderState extends State<ClosetHeroHeader>
 
   void spinCounterClockwise() {
     _queueSpin(4.2);
+  }
+
+  void stopLoadingScroll() {
+    if (mounted && _scrollController.hasClients) _scrollController.jumpTo(_scrollController.offset);
   }
 
   void startContinuousLoadingScroll() {
@@ -1649,17 +1827,17 @@ class MainScaffold extends StatefulWidget {
 class _MainScaffoldState extends State<MainScaffold> {
   int index = 1;
   late final PageController _pageController;
-
-  late final List<Widget> pages = const [
-    InventoryPage(),
-    HomePage(),
-    UploadPage(),
-  ];
+  late final List<Widget> pages;
 
   @override
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: index);
+    pages = [
+      const InventoryPage(),
+      const HomePage(),
+      UploadPage(onSaved: () => _goToPage(0)),
+    ];
   }
 
   @override
@@ -1679,6 +1857,14 @@ class _MainScaffoldState extends State<MainScaffold> {
   @override
 Widget build(BuildContext context) {
   return Scaffold(
+    appBar: PreviewSession.instance.active ? GarmentPreviewToolbar(
+      maleCount: finishedStylesFor('male_average').length,
+      femaleCount: finishedStylesFor('female_average').length,
+      profile: context.watch<AvatarSettings>().bodyType.name,
+      onChanged: (profile) => context.read<AvatarSettings>().setBodyType(
+          profile == 'female' ? AvatarBodyType.female : AvatarBodyType.male),
+      onExit: () => PreviewSession.instance.signOut(),
+    ) : null,
     backgroundColor: Colors.transparent,
     extendBody: true,
     body: Stack(
@@ -1845,6 +2031,8 @@ class _NavItem extends StatelessWidget {
 enum ClosetCategory {
   tops,
   bottoms,
+  dresses,
+  other,
 }
 
 class WardrobeItem {
@@ -1859,6 +2047,7 @@ class WardrobeItem {
   final String season;
   final String? overlayAsset;
   final String? modelFileName;
+  final Map<String, String?> modelVariants;
   final bool availableForMale;
   final bool availableForFemale;
 
@@ -1874,9 +2063,69 @@ class WardrobeItem {
     required this.season,
     this.overlayAsset,
     this.modelFileName,
+    this.modelVariants = const {},
     this.availableForMale = true,
     this.availableForFemale = true,
   });
+
+  factory WardrobeItem.fromCanonical(ClothingItem item) {
+    final colorValue = garmentDisplayColor(item);
+    return WardrobeItem(
+      id: item.id,
+      label: garmentDisplayName(item),
+      category: switch (garmentDisplayGroup(item)) {
+        GarmentDisplayGroup.tops => ClosetCategory.tops,
+        GarmentDisplayGroup.bottoms => ClosetCategory.bottoms,
+        GarmentDisplayGroup.dresses => ClosetCategory.dresses,
+        GarmentDisplayGroup.other => ClosetCategory.other,
+      },
+      color: Color(colorValue),
+      // The canonical garment has no per-item wash timestamp. Never invent
+      // "today" history for a newly uploaded or restored garment.
+      lastWornDays: -1,
+      lastWashedDays: -1,
+      notes: item.classification.source == DataSource.tailor
+          ? 'Classified by Tailor' : 'Added to wardrobe',
+      wears: 0,
+      season: item.attributes.seasons.isEmpty
+          ? 'Not set' : item.attributes.seasons.map(enumWire).join(', '),
+      overlayAsset: item.media.frontOriginal,
+      modelVariants: item.digital3D.status == AssetStatus.ready
+          ? item.bodyCompatibility.fitVariants : const {},
+      availableForMale: garmentVisibleForProfile(item, 'male_average'),
+      availableForFemale: garmentVisibleForProfile(item, 'female_average'),
+    );
+  }
+
+  ClothingItem toCanonicalItem() {
+    final created = DateTime.utc(2026, 1, 1);
+    final role = category == ClosetCategory.tops
+        ? LayerRole.top : LayerRole.bottom;
+    final male = availableForMale ? modelAssetFor(AvatarBodyType.male) : null;
+    final female = availableForFemale ? modelAssetFor(AvatarBodyType.female) : null;
+    return ClothingItem(
+      id: id,
+      name: label,
+      colorLabel: '#${color.value.toRadixString(16).padLeft(8, '0')}',
+      source: GarmentSource(type: GarmentSourceType.catalogue,
+          createdAt: created, updatedAt: created),
+      classification: const GarmentClassification(
+          category: GarmentCategory.unknown,
+          userConfirmed: false, source: DataSource.catalogue),
+      attributes: GarmentAttributes(
+          primaryColor: '#${color.value.toRadixString(16).padLeft(8, '0')}',
+          layerRole: role),
+      digital3D: Digital3DAsset(
+          status: modelFileName == null ? AssetStatus.notGenerated : AssetStatus.ready,
+          format: modelFileName == null ? null : 'glb',
+          assetUrl: male ?? female),
+      bodyCompatibility: BodyCompatibility(
+          canonicalProfiles: [if (male != null) 'male_average',
+              if (female != null) 'female_average'],
+          fitVariants: {if (male != null) 'male_average': male,
+              if (female != null) 'female_average': female}),
+    );
+  }
 
 
   bool isAvailableFor(AvatarBodyType bodyType) {
@@ -1886,6 +2135,9 @@ class WardrobeItem {
   }
 
   String? modelAssetFor(AvatarBodyType bodyType) {
+    final profile = bodyType == AvatarBodyType.female ? 'female_average' : 'male_average';
+    final generated = modelVariants[profile];
+    if (generated != null && generated.isNotEmpty) return generated;
     final fileName = modelFileName;
     if (fileName == null || fileName.isEmpty) return null;
 
@@ -1903,9 +2155,14 @@ class WardrobeItem {
         return 'Tops';
       case ClosetCategory.bottoms:
         return 'Bottoms';
+      case ClosetCategory.dresses:
+        return 'Dresses';
+      case ClosetCategory.other:
+        return 'Other';
     }
   }
   String get lastWornLabel {
+  if (lastWornDays < 0) return 'Not recorded';
   if (lastWornDays == 0) return 'Worn today';
   if (lastWornDays == 1) return 'Worn yesterday';
   if (lastWornDays < 7) return 'Worn $lastWornDays days ago';
@@ -1920,6 +2177,7 @@ class WardrobeItem {
 }
 
 String get lastWashedLabel {
+  if (lastWashedDays < 0) return 'Not recorded';
   if (lastWashedDays == 0) return 'Washed today';
   if (lastWashedDays == 1) return 'Washed yesterday';
   if (lastWashedDays < 7) return 'Washed $lastWashedDays days ago';
@@ -1934,256 +2192,9 @@ String get lastWashedLabel {
 }
 }
 
-const List<WardrobeItem> kDemoWardrobeItems = [
-  // MALE TOPS
-  WardrobeItem(
-    id: 'male_top_zipper_hoodie',
-    label: 'Zipper Hoodie',
-    category: ClosetCategory.tops,
-    color: Color(0xFF234E7E),
-    lastWornDays: 0,
-    lastWashedDays: 4,
-    notes: 'Zipper hoodie.',
-    wears: 3,
-    season: 'All Season',
-    modelFileName: 'zipperhoodiem.glb',
-    availableForMale: true,
-    availableForFemale: false,
-  ),
-  WardrobeItem(
-    id: 'male_top_tshirt',
-    label: 'T-Shirt',
-    category: ClosetCategory.tops,
-    color: Color(0xFFEADDCB),
-    lastWornDays: 1,
-    lastWashedDays: 5,
-    notes: 'T-shirt.',
-    wears: 4,
-    season: 'All Season',
-    modelFileName: 'tshirtm.glb',
-    availableForMale: true,
-    availableForFemale: false,
-  ),
-  WardrobeItem(
-    id: 'male_top_sweater',
-    label: 'Sweater',
-    category: ClosetCategory.tops,
-    color: Color(0xFF9F8C7A),
-    lastWornDays: 3,
-    lastWashedDays: 7,
-    notes: 'Sweater without a hood.',
-    wears: 6,
-    season: 'All Season',
-    modelFileName: 'sweaterm.glb',
-    availableForMale: true,
-    availableForFemale: false,
-  ),
-  WardrobeItem(
-    id: 'male_top_relaxed_tshirt',
-    label: 'Relaxed T-Shirt',
-    category: ClosetCategory.tops,
-    color: Color(0xFF6F95D1),
-    lastWornDays: 4,
-    lastWashedDays: 8,
-    notes: 'Relaxed fit T-shirt.',
-    wears: 7,
-    season: 'All Season',
-    modelFileName: 'relaxedtshirtm.glb',
-    availableForMale: true,
-    availableForFemale: false,
-  ),
-  WardrobeItem(
-    id: 'male_top_pullover',
-    label: 'Pullover',
-    category: ClosetCategory.tops,
-    color: Color(0xFF0B7A69),
-    lastWornDays: 2,
-    lastWashedDays: 6,
-    notes: 'Pullover.',
-    wears: 5,
-    season: 'All Season',
-    modelFileName: 'pulloverm.glb',
-    availableForMale: true,
-    availableForFemale: false,
-  ),
-
-  // MALE BOTTOMS
-  WardrobeItem(
-    id: 'male_bottom_jeans',
-    label: 'Jeans',
-    category: ClosetCategory.bottoms,
-    color: Color(0xFF5579A8),
-    lastWornDays: 5,
-    lastWashedDays: 9,
-    notes: 'Jeans.',
-    wears: 8,
-    season: 'All Season',
-    modelFileName: 'jeans.glb',
-    availableForMale: true,
-    availableForFemale: false,
-  ),
-  WardrobeItem(
-    id: 'male_bottom_black_pants',
-    label: 'Black Pants',
-    category: ClosetCategory.bottoms,
-    color: Color(0xFF2E3035),
-    lastWornDays: 6,
-    lastWashedDays: 10,
-    notes: 'Black pants.',
-    wears: 9,
-    season: 'All Season',
-    modelFileName: 'blackpants.glb',
-    availableForMale: true,
-    availableForFemale: false,
-  ),
-
-  // FEMALE TOPS
-  WardrobeItem(
-    id: 'female_top_zipper_hoodie',
-    label: 'Zipper Hoodie',
-    category: ClosetCategory.tops,
-    color: Color(0xFF234E7E),
-    lastWornDays: 0,
-    lastWashedDays: 4,
-    notes: 'Zipper hoodie.',
-    wears: 3,
-    season: 'All Season',
-    modelFileName: 'zipperhoodief.glb',
-    availableForMale: false,
-    availableForFemale: true,
-  ),
-  WardrobeItem(
-    id: 'female_top_tshirt',
-    label: 'T-Shirt',
-    category: ClosetCategory.tops,
-    color: Color(0xFFEADDCB),
-    lastWornDays: 1,
-    lastWashedDays: 5,
-    notes: 'T-shirt.',
-    wears: 4,
-    season: 'All Season',
-    modelFileName: 'tshirtf.glb',
-    availableForMale: false,
-    availableForFemale: true,
-  ),
-  WardrobeItem(
-    id: 'female_top_sweater',
-    label: 'Sweater',
-    category: ClosetCategory.tops,
-    color: Color(0xFF6C8C7A),
-    lastWornDays: 2,
-    lastWashedDays: 6,
-    notes: 'Sweater without a hood.',
-    wears: 5,
-    season: 'All Season',
-    modelFileName: 'sweaternohoodief.glb',
-    availableForMale: false,
-    availableForFemale: true,
-  ),
-  WardrobeItem(
-    id: 'female_top_relaxed_tshirt',
-    label: 'Relaxed T-Shirt',
-    category: ClosetCategory.tops,
-    color: Color(0xFF6F95D1),
-    lastWornDays: 3,
-    lastWashedDays: 7,
-    notes: 'Relaxed fit T-shirt.',
-    wears: 6,
-    season: 'All Season',
-    modelFileName: 'relaxedtshirtf.glb',
-    availableForMale: false,
-    availableForFemale: true,
-  ),
-  WardrobeItem(
-    id: 'female_top_hoodie',
-    label: 'Hoodie',
-    category: ClosetCategory.tops,
-    color: Color(0xFF9F8C7A),
-    lastWornDays: 4,
-    lastWashedDays: 8,
-    notes: 'Pullover hoodie.',
-    wears: 7,
-    season: 'All Season',
-    modelFileName: 'hoodief.glb',
-    availableForMale: false,
-    availableForFemale: true,
-  ),
-  WardrobeItem(
-    id: 'female_top_cropped_shirt',
-    label: 'Cropped Shirt',
-    category: ClosetCategory.tops,
-    color: Color(0xFFF4F1EA),
-    lastWornDays: 5,
-    lastWashedDays: 9,
-    notes: 'Cropped shirt.',
-    wears: 8,
-    season: 'All Season',
-    modelFileName: 'croppedshirtf.glb',
-    availableForMale: false,
-    availableForFemale: true,
-  ),
-
-  // FEMALE BOTTOMS
-  WardrobeItem(
-    id: 'female_bottom_tennis_skirt',
-    label: 'Tennis Skirt',
-    category: ClosetCategory.bottoms,
-    color: Color(0xFFF4F1EA),
-    lastWornDays: 0,
-    lastWashedDays: 3,
-    notes: 'Tennis skirt.',
-    wears: 5,
-    season: 'All Season',
-    modelFileName: 'tennisskirtf.glb',
-    availableForMale: false,
-    availableForFemale: true,
-  ),
-  WardrobeItem(
-    id: 'female_bottom_sweats',
-    label: 'Sweatpants',
-    category: ClosetCategory.bottoms,
-    color: Color(0xFF545A61),
-    lastWornDays: 1,
-    lastWashedDays: 4,
-    notes: 'Sweatpants.',
-    wears: 6,
-    season: 'All Season',
-    modelFileName: 'sweatsf.glb',
-    availableForMale: false,
-    availableForFemale: true,
-  ),
-  WardrobeItem(
-    id: 'female_bottom_skinny_jeans',
-    label: 'Skinny Jeans',
-    category: ClosetCategory.bottoms,
-    color: Color(0xFF5579A8),
-    lastWornDays: 2,
-    lastWashedDays: 5,
-    notes: 'Skinny jeans.',
-    wears: 7,
-    season: 'All Season',
-    modelFileName: 'skinnyjeansf.glb',
-    availableForMale: false,
-    availableForFemale: true,
-  ),
-  WardrobeItem(
-    id: 'female_bottom_pencil_pleated_skirt',
-    label: 'Pencil Pleated Skirt',
-    category: ClosetCategory.bottoms,
-    color: Color(0xFF6C8C7A),
-    lastWornDays: 3,
-    lastWashedDays: 6,
-    notes: 'Pencil pleated skirt.',
-    wears: 8,
-    season: 'All Season',
-    modelFileName: 'pencilpleatedskirtf.glb',
-    availableForMale: false,
-    availableForFemale: true,
-  ),
-];
-
-List<WardrobeItem> wardrobeItemsFor(AvatarBodyType bodyType) {
-  return kDemoWardrobeItems
+List<WardrobeItem> wardrobeItemsFor(
+    InventoryStore inventory, AvatarBodyType bodyType) {
+  return inventory.items.map(WardrobeItem.fromCanonical)
       .where((item) => item.isAvailableFor(bodyType))
       .toList(growable: false);
 }
@@ -2219,8 +2230,8 @@ class _HomePageState extends State<HomePage> {
 
   final List<SavedOutfit> _favouriteOutfits = [];
 
-  String _favouritesStorageKey(AvatarBodyType bodyType) =>
-      'textyle.favourites.${bodyType.name}';
+  String _favouritesStorageKey(AvatarBodyType bodyType) => 'favourites_${bodyType.name}';
+  int _favouritesLoadToken = 0;
 
   bool get _currentOutfitIsFavourite {
     final top = selectedTop;
@@ -2231,19 +2242,18 @@ class _HomePageState extends State<HomePage> {
     return _favouriteOutfits.any((outfit) => outfit.id == id);
   }
 
-  void _loadFavouritesForBody(AvatarBodyType bodyType) {
-    final availableItems = wardrobeItemsFor(bodyType);
+  Future<void> _loadFavouritesForBody(AvatarBodyType bodyType) async {
+    final token = ++_favouritesLoadToken;
+    final availableItems = wardrobeItemsFor(context.read<InventoryStore>(), bodyType);
     final itemsById = <String, WardrobeItem>{
       for (final item in availableItems) item.id: item,
     };
 
-    final raw = html.window.localStorage[_favouritesStorageKey(bodyType)];
-
     _favouriteOutfits.clear();
-
-    if (raw == null || raw.trim().isEmpty) return;
-
     try {
+      final raw = await context.read<WardrobeAccount>().document(_favouritesStorageKey(bodyType)).read();
+      if (!mounted || token != _favouritesLoadToken) return;
+      if (raw == null || raw.trim().isEmpty) return;
       final decoded = jsonDecode(raw);
       if (decoded is! List) return;
 
@@ -2273,12 +2283,13 @@ class _HomePageState extends State<HomePage> {
         }
       }
     } catch (_) {
-      // Ignore malformed/stale saved data and start with an empty list.
+      if (!mounted || token != _favouritesLoadToken) return;
       _favouriteOutfits.clear();
     }
+    if (mounted) setState(() {});
   }
 
-  void _persistFavourites() {
+  Future<bool> _persistFavourites() async {
     final bodyType = context.read<AvatarSettings>().bodyType;
     final payload = _favouriteOutfits
         .map(
@@ -2289,16 +2300,22 @@ class _HomePageState extends State<HomePage> {
         )
         .toList(growable: false);
 
-    html.window.localStorage[_favouritesStorageKey(bodyType)] =
-        jsonEncode(payload);
+    try {
+      await context.read<WardrobeAccount>().document(_favouritesStorageKey(bodyType)).write(jsonEncode(payload));
+      return true;
+    } catch (_) {
+      if (mounted) ThreadMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Could not save favourites. Reopen the app to load the latest wardrobe, then try again.')));
+      return false;
+    }
   }
 
-  void _toggleFavouriteOutfit() {
+  Future<void> _toggleFavouriteOutfit() async {
     final top = selectedTop;
     final bottom = selectedBottom;
 
     if (top == null || bottom == null) {
-      ScaffoldMessenger.of(context)
+      ThreadMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
           const SnackBar(
@@ -2316,6 +2333,7 @@ class _HomePageState extends State<HomePage> {
     );
 
     final wasSaved = existingIndex >= 0;
+    final previous = List<SavedOutfit>.of(_favouriteOutfits);
 
     setState(() {
       if (wasSaved) {
@@ -2329,9 +2347,11 @@ class _HomePageState extends State<HomePage> {
       }
     });
 
-    _persistFavourites();
+    final saved = await _persistFavourites();
+    if (!mounted) return;
+    if (!saved) { setState(() { _favouriteOutfits..clear()..addAll(previous); }); return; }
 
-    ScaffoldMessenger.of(context)
+    ThreadMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
@@ -2355,12 +2375,14 @@ class _HomePageState extends State<HomePage> {
     Navigator.of(context).pop();
   }
 
-  void _removeFavouriteOutfit(SavedOutfit outfit) {
+  Future<void> _removeFavouriteOutfit(SavedOutfit outfit) async {
+    final previous = List<SavedOutfit>.of(_favouriteOutfits);
     setState(() {
       _favouriteOutfits.removeWhere((saved) => saved.id == outfit.id);
     });
 
-    _persistFavourites();
+    final saved = await _persistFavourites();
+    if (!saved && mounted) setState(() { _favouriteOutfits..clear()..addAll(previous); });
   }
 
   void _showFavourites() {
@@ -2561,12 +2583,19 @@ class _HomePageState extends State<HomePage> {
 
   List<WardrobeItem> get visibleItems {
     final bodyType = context.read<AvatarSettings>().bodyType;
-    return wardrobeItemsFor(bodyType)
+    return wardrobeItemsFor(context.watch<InventoryStore>(), bodyType)
         .where((item) => item.category == selectedCategory)
         .toList();
   }
 
   void _selectItem(WardrobeItem item) {
+    if (item.category != ClosetCategory.tops &&
+        item.category != ClosetCategory.bottoms) return;
+    if (item.modelAssetFor(context.read<AvatarSettings>().bodyType) == null) {
+      ThreadMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Added to outfit. A fitted 3D preview is not available for this garment yet.'),
+      ));
+    }
     setState(() {
       if (item.category == ClosetCategory.tops) {
         selectedTop = item;
@@ -2720,6 +2749,24 @@ Widget build(BuildContext context) {
   selectedBottom: selectedBottom,
   onSelectItem: _selectItem,
 ),
+            if (context.watch<InventoryStore>().items.isEmpty) ...[
+              const SizedBox(height: 20),
+              Container(width: double.infinity, padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(28)),
+                child: Column(children: [
+                  const Icon(Icons.checkroom_outlined, color: AppColors.primary, size: 32),
+                  const SizedBox(height: 12),
+                  const Text('Your closet starts here', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  const Text('Add your own clothes to start building outfits.', textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.textMuted, height: 1.5)),
+                  const SizedBox(height: 18),
+                  FilledButton.icon(onPressed: () => context.findAncestorStateOfType<_MainScaffoldState>()?._goToPage(2),
+                    icon: const Icon(Icons.add_rounded), label: const Text('Add your first garment')),
+                ])),
+            ],
+            const SizedBox(height: 20),
+            const TobyOutfitTools(),
           ],
         ),
       ),
@@ -2738,11 +2785,7 @@ class _HomeHeader extends StatelessWidget {
         _HomeHeaderPillButton(
           icon: Icons.logout_rounded,
           label: 'Log out',
-          onTap: () {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const AuthPage()),
-            );
-          },
+          onTap: () => _signOutAccount(context),
         ),
 
         const Spacer(),
@@ -2927,9 +2970,9 @@ class ProfilePage extends StatelessWidget {
 
                 const SizedBox(height: 18),
 
-                const Center(
+                Center(
                   child: Text(
-                    'textyle user',
+                    PreviewSession.instance.active ? 'username' : (supa.Supabase.instance.client.auth.currentUser?.userMetadata?['display_name']?.toString() ?? 'Your profile'),
                     style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.w900,
@@ -2941,9 +2984,9 @@ class ProfilePage extends StatelessWidget {
 
                 const SizedBox(height: 4),
 
-                const Center(
+                Center(
                   child: Text(
-                    'user@email.com',
+                    PreviewSession.instance.active ? 'Local garment preview' : (supa.Supabase.instance.client.auth.currentUser?.email ?? ''),
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
@@ -2969,14 +3012,14 @@ const SizedBox(height: 18),
                     _ProfileInfoTile(
                       icon: Icons.email_outlined,
                       title: 'Email',
-                      subtitle: 'user@email.com',
+                      subtitle: PreviewSession.instance.active ? 'Local garment preview' : (supa.Supabase.instance.client.auth.currentUser?.email ?? ''),
                       onTap: () {},
                     ),
                     _ProfileInfoTile(
                       icon: Icons.lock_outline_rounded,
                       title: 'Password',
-                      subtitle: 'Change your password',
-                      onTap: () {},
+                      subtitle: PreviewSession.instance.active ? 'Preview password: password' : 'Change your password',
+                      onTap: () { if (!PreviewSession.instance.active) Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountPasswordPage())); },
                     ),
                   ],
                 ),
@@ -3013,6 +3056,12 @@ const SizedBox(height: 18),
                   title: 'Preferences',
                   children: [
                     _ProfileInfoTile(
+                      icon: Icons.backup_outlined,
+                      title: PreviewSession.instance.active ? 'Preview wardrobe' : 'Cloud wardrobe',
+                      subtitle: PreviewSession.instance.active ? 'Resets when you exit or refresh' : 'Saved privately to your account',
+                      onTap: () => ThreadMessenger.of(context).showSnackBar(SnackBar(content: Text(PreviewSession.instance.active ? 'This preview stays on this device and resets when you exit or refresh.' : 'Your wardrobe is saved to your account. Reopen the app to load changes from another device.'))),
+                    ),
+                    _ProfileInfoTile(
                       icon: Icons.notifications_none_rounded,
                       title: 'Notifications',
                       subtitle: 'Outfit and closet updates',
@@ -3033,11 +3082,7 @@ const SizedBox(height: 18),
                   height: 46,
                   width: double.infinity,
                   child: OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).pushReplacement(
-                        MaterialPageRoute(builder: (_) => const AuthPage()),
-                      );
-                    },
+                    onPressed: () => _signOutAccount(context),
                     icon: const Icon(Icons.logout_rounded, size: 19),
                     label: const Text('Log out'),
                     style: OutlinedButton.styleFrom(
@@ -3220,10 +3265,10 @@ class _AvatarBodySelector extends StatelessWidget {
               label: 'Male',
               icon: Icons.male_rounded,
               selected: selectedType == AvatarBodyType.male,
-              onTap: () {
-                context.read<AvatarSettings>().setBodyType(
-                      AvatarBodyType.male,
-                    );
+              onTap: () async {
+                final saved = await context.read<AvatarSettings>().setBodyType(AvatarBodyType.male);
+                if (!saved && context.mounted) ThreadMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Could not save your avatar choice. Reopen the app and try again.')));
               },
             ),
           ),
@@ -3232,10 +3277,10 @@ class _AvatarBodySelector extends StatelessWidget {
               label: 'Female',
               icon: Icons.female_rounded,
               selected: selectedType == AvatarBodyType.female,
-              onTap: () {
-                context.read<AvatarSettings>().setBodyType(
-                      AvatarBodyType.female,
-                    );
+              onTap: () async {
+                final saved = await context.read<AvatarSettings>().setBodyType(AvatarBodyType.female);
+                if (!saved && context.mounted) ThreadMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Could not save your avatar choice. Reopen the app and try again.')));
               },
             ),
           ),
@@ -3353,8 +3398,9 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
       path: '/outfit_viewer.html',
       queryParameters: <String, String>{
         'avatar': avatarAsset,
-        if (_topAsset.isNotEmpty) 'top': _topAsset,
-        if (_bottomAsset.isNotEmpty) 'bottom': _bottomAsset,
+        'viewerRevision': 'closer-thread-v1',
+        if (_topAsset.isNotEmpty && !isStoredGarmentMedia(_topAsset)) 'top': _topAsset,
+        if (_bottomAsset.isNotEmpty && !isStoredGarmentMedia(_bottomAsset)) 'bottom': _bottomAsset,
       },
     ).toString();
   }
@@ -3392,21 +3438,22 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
     _iframe?.contentWindow?.postMessage(message, '*');
   }
 
-  void _syncEntireOutfit() {
+  int _outfitSyncToken = 0;
+  Future<void> _syncEntireOutfit() async {
     if (!mounted) return;
-
+    final token = ++_outfitSyncToken;
     final avatarAsset = context.read<AvatarSettings>().avatarAsset;
+    final top = _topAsset, bottom = _bottomAsset;
+    final media = context.read<GarmentMediaStore>();
+    final urls = await Future.wait([
+      browserModelUrl(top, media), browserModelUrl(bottom, media),
+    ]);
+    if (!mounted || token != _outfitSyncToken ||
+        top != _topAsset || bottom != _bottomAsset) return;
     _postMessage(<String, Object>{
-      'type': 'textyle-set-body-outfit',
-      'avatar': avatarAsset,
-      'top': _topAsset,
-      'bottom': _bottomAsset,
+      'type': 'textyle-set-body-outfit', 'avatar': avatarAsset,
+      'top': urls[0] ?? '', 'bottom': urls[1] ?? '',
     });
-  }
-
-  void _sendToViewer(Map<String, Object> message) {
-    if (!mounted || _iframe == null) return;
-    _postMessage(message);
   }
 
   void _queueRotation(double deltaX) {
@@ -3437,32 +3484,16 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
     if (_lastAvatarAsset == avatarAsset) return;
 
     _lastAvatarAsset = avatarAsset;
-    _sendToViewer(<String, Object>{
-      'type': 'textyle-set-body-outfit',
-      'avatar': avatarAsset,
-      'top': _topAsset,
-      'bottom': _bottomAsset,
-    });
+    _syncEntireOutfit();
   }
 
   @override
   void didUpdateWidget(covariant _ThreeDAvatarPreview oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    if (oldWidget.selectedTop?.modelFileName !=
-        widget.selectedTop?.modelFileName) {
-      _sendToViewer(<String, Object>{
-        'type': 'textyle-set-top',
-        'asset': _topAsset,
-      });
-    }
-
-    if (oldWidget.selectedBottom?.modelFileName !=
-        widget.selectedBottom?.modelFileName) {
-      _sendToViewer(<String, Object>{
-        'type': 'textyle-set-bottom',
-        'asset': _bottomAsset,
-      });
+    if ((oldWidget.selectedTop?.modelAssetFor(_bodyType) ?? '') != _topAsset ||
+        (oldWidget.selectedBottom?.modelAssetFor(_bodyType) ?? '') != _bottomAsset) {
+      _syncEntireOutfit();
     }
   }
 
@@ -3492,8 +3523,8 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
         _queueRotation(details.delta.dx);
       },
       child: SizedBox(
-        width: 300,
-        height: 400,
+        width: double.infinity,
+        height: 440,
         child: ClipRect(
           child: HtmlElementView(viewType: _viewType),
         ),
@@ -3520,7 +3551,7 @@ class _FloatingOutfitHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 420,
+      height: 466,
       width: double.infinity,
       child: Stack(
         alignment: Alignment.center,
@@ -3551,7 +3582,7 @@ class _FloatingOutfitHero extends StatelessWidget {
             ),
           ),
           Positioned(
-            top: 15,
+            top: 8,
             left: 0,
             right: 0,
             child: Center(
@@ -3705,7 +3736,7 @@ class _SelectedPiecesRow extends StatelessWidget {
     required String title,
   }) {
     final bodyType = context.read<AvatarSettings>().bodyType;
-    final items = wardrobeItemsFor(bodyType)
+    final items = wardrobeItemsFor(context.read<InventoryStore>(), bodyType)
         .where((item) => item.category == category)
         .toList();
 
@@ -4410,19 +4441,26 @@ class _ClothingModelThumbnailState extends State<_ClothingModelThumbnail> {
   void didUpdateWidget(covariant _ClothingModelThumbnail oldWidget) {
     super.didUpdateWidget(oldWidget);
 
+    final body = context.read<AvatarSettings>().bodyType;
     if (oldWidget.item.id != widget.item.id ||
-        oldWidget.item.modelFileName != widget.item.modelFileName) {
+        oldWidget.item.modelAssetFor(body) != widget.item.modelAssetFor(body)) {
       _configureThumbnail(
         context.read<AvatarSettings>().bodyType,
       );
     }
   }
 
-  void _configureThumbnail(AvatarBodyType bodyType) {
-    _modelAsset = _resolveModelAsset(widget.item, bodyType);
-    _viewType = _modelAsset == null
-        ? null
-        : _ensureViewFactory(_modelAsset!);
+  int _thumbnailToken = 0;
+  Future<void> _configureThumbnail(AvatarBodyType bodyType) async {
+    final token = ++_thumbnailToken;
+    final reference = _resolveModelAsset(widget.item, bodyType);
+    final media = context.read<GarmentMediaStore>();
+    final asset = await browserModelUrl(reference, media);
+    if (!mounted || token != _thumbnailToken) return;
+    setState(() {
+      _modelAsset = asset;
+      _viewType = asset == null ? null : _ensureViewFactory(asset);
+    });
   }
 
   String? _resolveModelAsset(
@@ -4430,7 +4468,7 @@ class _ClothingModelThumbnailState extends State<_ClothingModelThumbnail> {
     AvatarBodyType bodyType,
   ) {
     final asset = item.modelAssetFor(bodyType);
-    if (asset == null || !asset.toLowerCase().endsWith('.glb')) {
+    if (asset == null || (!isStoredGarmentMedia(asset) && !asset.toLowerCase().endsWith('.glb'))) {
       return null;
     }
     return asset;
@@ -4468,6 +4506,18 @@ class _ClothingModelThumbnailState extends State<_ClothingModelThumbnail> {
   @override
   Widget build(BuildContext context) {
     if (_viewType == null) {
+      final reference = widget.item.overlayAsset;
+      if (reference != null && isStoredGarmentMedia(reference)) {
+        return FutureBuilder<Uint8List?>(
+          future: context.read<GarmentMediaStore>().get(reference),
+          builder: (context, snapshot) {
+            final bytes = snapshot.data;
+            if (bytes == null) return Center(child: widget.fallback);
+            return Image.memory(bytes, fit: BoxFit.contain,
+                gaplessPlayback: true);
+          },
+        );
+      }
       return Center(child: widget.fallback);
     }
 
@@ -4533,132 +4583,10 @@ class _ClosetGridTile extends StatelessWidget {
 }
 
 class _ClothingInfoSheet extends StatelessWidget {
+  const _ClothingInfoSheet({required this.item});
   final WardrobeItem item;
-
-  const _ClothingInfoSheet({
-    required this.item,
-  });
-
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.55,
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.fromLTRB(22, 20, 22, 24),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.96),
-        borderRadius: BorderRadius.circular(34),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.12),
-            blurRadius: 30,
-            offset: const Offset(0, 16),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        top: false,
-        child: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 48,
-                  height: 5,
-                  decoration: BoxDecoration(
-                color: const Color(0xFFDCE6F0),
-                borderRadius: BorderRadius.circular(99),
-              ),
-            ),
-
-            const SizedBox(height: 22),
-
-            Container(
-              width: 98,
-              height: 98,
-              decoration: BoxDecoration(
-                color: item.color.withOpacity(0.10),
-                borderRadius: BorderRadius.circular(28),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: _ClothingModelThumbnail(
-                key: ValueKey<String>('info-sheet-3d-${item.id}'),
-                item: item,
-                fallback: const _ModelPreviewFallback(size: 30),
-              ),
-            ),
-
-            const SizedBox(height: 18),
-
-            Text(
-              item.label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w900,
-                color: AppColors.textDark,
-              ),
-            ),
-
-            const SizedBox(height: 6),
-
-            Text(
-              '${item.categoryLabel} · ${item.season}',
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textMuted,
-              ),
-            ),
-
-            const SizedBox(height: 22),
-
-            Row(
-              children: [
-                Expanded(
-                  child: _InfoStatCard(
-                    icon: Icons.history_rounded,
-                    title: 'Last worn',
-                    value: item.lastWornLabel.replaceFirst('Worn ', ''),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _InfoStatCard(
-                    icon: Icons.local_laundry_service_outlined,
-                    title: 'Last washed',
-                    value: item.lastWashedLabel.replaceFirst('Washed ', ''),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.bg,
-                borderRadius: BorderRadius.circular(22),
-              ),
-              child: Text(
-                item.notes,
-                style: const TextStyle(
-                  fontSize: 15,
-                  height: 1.35,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textMuted,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => _GarmentDetailsContent(item: item);
 }
 
 class _InfoStatCard extends StatelessWidget {
@@ -4788,12 +4716,18 @@ class _InventoryPageState extends State<InventoryPage> {
   List<WardrobeItem> get _filteredItems {
     final q = _query.trim().toLowerCase();
     List<WardrobeItem> items = [
-      ...wardrobeItemsFor(context.watch<AvatarSettings>().bodyType),
+      ...wardrobeItemsFor(context.watch<InventoryStore>(),
+          context.watch<AvatarSettings>().bodyType),
     ];
 
     switch (_selectedFilter) {
       case InventoryFilter.recentlyWorn:
-        items.sort((a, b) => a.lastWornDays.compareTo(b.lastWornDays));
+        // Unknown history must not sort ahead of garments worn today.
+        items.sort((a, b) {
+          if (a.lastWornDays < 0) return b.lastWornDays < 0 ? 0 : 1;
+          if (b.lastWornDays < 0) return -1;
+          return a.lastWornDays.compareTo(b.lastWornDays);
+        });
         break;
       case InventoryFilter.recentlyAdded:
         items = items.reversed.toList();
@@ -4837,7 +4771,8 @@ class _InventoryPageState extends State<InventoryPage> {
             .toList();
         break;
       case InventoryFilter.older:
-        items.sort((a, b) => b.lastWornDays.compareTo(a.lastWornDays));
+        items = items.where((item) => item.lastWornDays >= 0).toList()
+          ..sort((a, b) => b.lastWornDays.compareTo(a.lastWornDays));
         break;
       case InventoryFilter.olderThanSixMonths:
         items = items.where((item) => item.lastWornDays >= 180).toList();
@@ -4858,7 +4793,8 @@ class _InventoryPageState extends State<InventoryPage> {
 
   bool _hasResultsFor(InventoryFilter filter) {
     final items = [
-      ...wardrobeItemsFor(context.read<AvatarSettings>().bodyType),
+      ...wardrobeItemsFor(context.read<InventoryStore>(),
+          context.read<AvatarSettings>().bodyType),
     ];
 
     switch (filter) {
@@ -5516,145 +5452,56 @@ class _InventoryMetaLine extends StatelessWidget {
 
 
 class _InventoryDetailSheet extends StatelessWidget {
-  final WardrobeItem item;
-
   const _InventoryDetailSheet({required this.item});
+  final WardrobeItem item;
+  @override
+  Widget build(BuildContext context) => _GarmentDetailsContent(item: item);
+}
 
+class _GarmentDetailsContent extends StatelessWidget {
+  const _GarmentDetailsContent({required this.item});
+  final WardrobeItem item;
   @override
   Widget build(BuildContext context) {
+    final canonical = context.watch<InventoryStore>().findById(item.id);
+    final current = canonical == null ? item : WardrobeItem.fromCanonical(canonical);
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.97),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 26),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 42,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.10),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  Container(
-                    width: 92,
-                    height: 92,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1ECE5),
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: _ClothingModelThumbnail(
-                      key: ValueKey<String>('inventory-detail-3d-${item.id}'),
-                      item: item,
-                      fallback: const _ModelPreviewFallback(size: 30),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          item.label,
-                          style: const TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.textDark,
-                            letterSpacing: -0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          '${item.categoryLabel} · ${item.season}',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            color: AppColors.textMuted,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  Expanded(
-                    child: _InventoryInfoCard(
-                      icon: Icons.watch_later_outlined,
-                      label: 'Last worn',
-                      value: item.lastWornLabel.replaceFirst('Worn ', ''),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _InventoryInfoCard(
-                      icon: Icons.local_laundry_service_outlined,
-                      label: 'Last washed',
-                      value: item.lastWashedLabel.replaceFirst('Washed ', ''),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: _InventoryInfoCard(
-                      icon: Icons.repeat_rounded,
-                      label: 'Total wears',
-                      value: '${item.wears}',
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _InventoryInfoCard(
-                      icon: Icons.sell_outlined,
-                      label: 'Category',
-                      value: item.categoryLabel,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.78),
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(
-                    color: Colors.white.withOpacity(0.92),
-                  ),
-                ),
-                child: Text(
-                  item.notes,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: AppColors.textMuted,
-                    height: 1.45,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * .9),
+      decoration: const BoxDecoration(color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      child: SafeArea(top: false, child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24,12,24,28),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(
+            color: const Color(0xFFDDE4E7), borderRadius: BorderRadius.circular(99)))),
+          const SizedBox(height: 12),
+          Row(children: [const Expanded(child: Text('Garment details', style: TextStyle(fontSize: 15, color: AppColors.textMuted, fontWeight: FontWeight.w500))),
+            IconButton(tooltip: 'Close', onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close_rounded, size: 20))]),
+          const SizedBox(height: 8),
+          Row(children: [
+            Container(width: 84, height: 100, clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(color: AppColors.bg, borderRadius: BorderRadius.circular(22)),
+              child: _ClothingModelThumbnail(key: ValueKey('garment-detail-${current.id}'), item: current,
+                fallback: const _ModelPreviewFallback(size: 30))),
+            const SizedBox(width: 18),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(current.label, maxLines: 2, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 22, height: 1.2, fontWeight: FontWeight.w700, letterSpacing: -.5, color: AppColors.textDark)),
+              const SizedBox(height: 8),
+              Text('${current.categoryLabel} · ${current.season}', style: const TextStyle(fontSize: 13, height: 1.5, color: AppColors.textMuted)),
+            ])),
+          ]),
+          const SizedBox(height: 24),
+          Row(children: [Expanded(child: _InventoryInfoCard(icon: Icons.history_rounded,
+              label: 'Last worn', value: current.lastWornLabel.replaceFirst('Worn ',''))),
+            const SizedBox(width: 12), Expanded(child: _InventoryInfoCard(icon: Icons.local_laundry_service_outlined,
+              label: 'Last washed', value: current.lastWashedLabel.replaceFirst('Washed ','')))]),
+          const SizedBox(height: 12),
+          Row(children: [Expanded(child: _InventoryInfoCard(icon: Icons.repeat_rounded, label: 'Total wears', value: '${current.wears}')),
+            const SizedBox(width: 12), Expanded(child: _InventoryInfoCard(icon: Icons.checkroom_outlined, label: 'Category', value: current.categoryLabel))]),
+          TobyGarmentActions(current.id, bodyProfile: context.watch<AvatarSettings>().bodyType == AvatarBodyType.female ? 'female_average' : 'male_average'),
+        ]),
+      )),
     );
   }
 }
@@ -5673,20 +5520,14 @@ class _InventoryInfoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.78),
+        color: AppColors.bg,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
           color: Colors.white.withOpacity(0.92),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 14,
-            offset: const Offset(0, 6),
-          ),
-        ],
+
       ),
       child: Row(
         children: [
@@ -5695,7 +5536,7 @@ class _InventoryInfoCard extends StatelessWidget {
             height: 42,
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              color: Color(0xFFF6F3EE),
+              color: Color(0xFFE7F4F1),
             ),
             child: Icon(
               icon,
@@ -5722,7 +5563,7 @@ class _InventoryInfoCard extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 14.5,
                     color: AppColors.textDark,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
@@ -6223,7 +6064,8 @@ class _WeatherStat extends StatelessWidget {
 
 /// ---------- Upload ----------
 class UploadPage extends StatefulWidget {
-  const UploadPage({super.key});
+  const UploadPage({super.key, this.onSaved});
+  final VoidCallback? onSaved;
 
   @override
   State<UploadPage> createState() => _UploadPageState();
@@ -6241,21 +6083,17 @@ class _UploadPageState extends State<UploadPage> {
   bool _isScanningRfid = false;
 
   bool get _canSave {
-  return _frontImage != null &&
-      _backImage != null &&
-      _pairedRfidTag != null;
+  return _frontImage != null && _backImage != null;
 }
 
   Future<void> _pickImage(ImageSource source) async {
+  if (_isPicking) return;
   try {
     setState(() {
       _isPicking = true;
     });
 
-    final file = await _picker.pickImage(
-      source: source,
-      imageQuality: 92,
-    );
+    final file = await pickGarmentPhoto(context, source, _picker);
 
     if (!mounted || file == null) return;
 
@@ -6275,7 +6113,7 @@ class _UploadPageState extends State<UploadPage> {
     });
   } catch (_) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    ThreadMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Could not pick image')),
     );
   } finally {
@@ -6323,7 +6161,7 @@ Future<bool> _reviewPickedImage({
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      Container(color: const Color(0xFF151817)),
+                      Container(color: AppColors.bg),
                       Center(
                         child: Image.network(
                           file.path,
@@ -6416,104 +6254,8 @@ Future<bool> _reviewPickedImage({
   return result ?? false;
 }
 
-Future<void> _showCaptureGuide({
-  required bool front,
-  required ImageSource source,
-}) async {
-  final continueCapture = await showModalBottomSheet<bool>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    barrierColor: Colors.black.withOpacity(0.30),
-    builder: (sheetContext) {
-      return SafeArea(
-        top: false,
-        child: Container(
-          margin: const EdgeInsets.only(top: 32),
-          padding: const EdgeInsets.fromLTRB(18, 14, 18, 22),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: const BorderRadius.vertical(
-              top: Radius.circular(32),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.10),
-                blurRadius: 30,
-                offset: const Offset(0, -8),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 42,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(99),
-                ),
-              ),
-              const SizedBox(height: 14),
-              AspectRatio(
-                aspectRatio: 1.0,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(28),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Container(
-                        color: const Color(0xFF161B19),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton.icon(
-                  onPressed: () => Navigator.pop(sheetContext, true),
-                  icon: Icon(
-                    source == ImageSource.camera
-                        ? Icons.camera_alt_outlined
-                        : Icons.photo_library_outlined,
-                    size: 20,
-                  ),
-                  label: Text(
-                    source == ImageSource.camera
-                        ? 'Continue to camera'
-                        : 'Choose photo',
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(17),
-                    ),
-                    textStyle: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    },
-  );
-
-  if (continueCapture == true && mounted) {
-    await _pickImage(source);
-  }
-}
-
 void _showImageSourceSheet({required bool front}) {
+  if (_isPicking) return;
   setState(() {
     _pickingFront = front;
   });
@@ -6526,7 +6268,7 @@ void _showImageSourceSheet({required bool front}) {
       return Container(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.97),
+          color: Colors.white,
           borderRadius: const BorderRadius.vertical(
             top: Radius.circular(30),
           ),
@@ -6579,25 +6321,19 @@ void _showImageSourceSheet({required bool front}) {
                 icon: Icons.photo_library_outlined,
                 onTap: () {
                   Navigator.pop(context);
-                  _showCaptureGuide(
-                    front: front,
-                    source: ImageSource.gallery,
-                  );
+                  _pickImage(ImageSource.gallery);
                 },
               ),
 
               const SizedBox(height: 10),
 
               _TypeChoiceTile(
-                label: 'Take a photo',
+                label: 'Take photo',
                 subtitle: 'Use your camera',
                 icon: Icons.camera_alt_outlined,
                 onTap: () {
                   Navigator.pop(context);
-                  _showCaptureGuide(
-                    front: front,
-                    source: ImageSource.camera,
-                  );
+                  _pickImage(ImageSource.camera);
                 },
               ),
             ],
@@ -6610,7 +6346,7 @@ void _showImageSourceSheet({required bool front}) {
 
   Future<void> _scanRfidTag() async {
     if (_frontImage == null || _backImage == null) {
-  ScaffoldMessenger.of(context).showSnackBar(
+  ThreadMessenger.of(context).showSnackBar(
     const SnackBar(
       content: Text('Add front and back photos before pairing an RFID tag'),
       duration: Duration(milliseconds: 1200),
@@ -6636,41 +6372,27 @@ void _showImageSourceSheet({required bool front}) {
     });
   }
 
-ClothingType _detectClothingType() {
-  return ClothingType.top;
-}
-
-  void _savePickedItem() {
+  Future<void> _savePickedItem() async {
     if (!_canSave) return;
-
-    final fileName = _frontImage!.name;
-    final dotIndex = fileName.lastIndexOf('.');
-    final displayName =
-        dotIndex > 0 ? fileName.substring(0, dotIndex) : fileName;
-
-    context.read<InventoryStore>().addItem(
-          ClothingItem(
-            id: DateTime.now().millisecondsSinceEpoch.toString(),
-            type: _detectClothingType(),
-            name: displayName.isEmpty ? 'New Item' : displayName,
-            colorLabel: 'RFID: $_pairedRfidTag',
-            originalImagePath: _frontImage!.path,
-          ),
-        );
-    // );
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Item saved to closet + hardware'),
-        duration: Duration(milliseconds: 1000),
+    final saved = await Navigator.of(context).push(MaterialPageRoute<bool>(
+      builder: (_) => AutomaticGarmentUploadPage(
+        front: _frontImage!,
+        back: _backImage!,
+        bodyProfile: context.read<AvatarSettings>().bodyType == AvatarBodyType.female
+            ? 'female_average' : 'male_average',
+        rfidTag: _pairedRfidTag,
+        rfidIsSimulated: _pairedRfidTag != null,
       ),
-    );
-
-    setState(() {
-  _frontImage = null;
-  _backImage = null;
-  _pairedRfidTag = null;
-});
+    ));
+    if (!mounted) return;
+    if (saved == true) {
+      setState(() {
+        _frontImage = null;
+        _backImage = null;
+        _pairedRfidTag = null;
+      });
+      widget.onSaved?.call();
+    }
   }
 
 Widget _buildSidePhotoCard({
@@ -6896,7 +6618,7 @@ Widget _buildSidePhotoCard({
                     const SizedBox(height: 6),
 
                     const Text(
-                      'Connect this item to the physical closet.',
+                      'Your photos will be processed automatically. RFID pairing is a simulated preview.',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -6965,14 +6687,12 @@ const SizedBox(height: 16),
                         ),
                         child: Text(
                         _canSave
-    ? 'Save to closet + hardware'
+    ? 'Process garment'
     : !hasFrontImage
         ? 'Add front photo first'
         : !hasBackImage
             ? 'Add back photo first'
-            : !hasRfid
-                ? 'Pair RFID tag first'
-                : 'Save to closet + hardware',
+            : 'Process garment',
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w900,

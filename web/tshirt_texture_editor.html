@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>T-shirt texture review</title>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:18px;background:#f4f7fa;color:#1d2228;font:15px/1.45 system-ui,sans-serif}h1{font-size:24px;margin:0 0 8px}p{margin:8px 0}.muted{color:#5f6971}.photos{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{background:white;border-radius:18px;padding:14px;min-width:0}h2{font-size:17px;margin:0 0 8px}.photo{width:100%;display:block;touch-action:none;cursor:crosshair;border-radius:10px;background:#eee}#preview{height:360px;background:#e8edf0;border-radius:14px;touch-action:none;cursor:grab}#preview canvas{display:block;width:100%;height:100%}.actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}button{background:#098c7f;color:white;border:0;border-radius:24px;padding:12px 18px;font:600 15px system-ui;cursor:pointer}button:disabled{opacity:.45;cursor:default}label{display:block;margin:12px 0}#status{white-space:pre-wrap;color:#33545a}.ready{color:#087d6e}@media(max-width:500px){.photos{grid-template-columns:1fr}#preview{height:300px}}
+</style><script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+</head><body>
+<h1>Put your photos on the T-shirt</h1>
+<p>On each photo, tap <b>two opposite corners of the shirt body</b>: shoulders to hem, excluding the sleeves, hanger and surrounding room. Tap again to reselect.</p>
+<p class="muted">This uses your existing male T-shirt shape. Sleeve texture is approximate. Approved Tailor cutouts are used when available; this editor does not automatically remove photo backgrounds.</p>
+<div class="photos"><section class="card"><h2>Front</h2><canvas id="front" class="photo"></canvas></section><section class="card"><h2>Back</h2><canvas id="back" class="photo"></canvas></section></div>
+<div class="actions"><button id="prepare" disabled>Update 3D preview</button><button id="turn" disabled>Turn around</button></div>
+<div id="preview"></div>
+<p class="muted">Drag the preview to rotate. Check print placement and cropping on both sides.</p>
+<label><input id="approve" type="checkbox" disabled> I reviewed the front, back and approximate sleeves.</label>
+<button id="save" disabled>Save textured T-shirt</button>
+<p id="status" role="status">Loading editor…</p>
+<script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
+import {TEMPLATE_SHA256,TEMPLATE_VERSION,projectionUV,cropFromPoints,validCrop,drawAtlas} from './tshirt_texture_core.js';
+const channel=new URLSearchParams(location.search).get('channel');
+const status=document.querySelector('#status'), prepare=document.querySelector('#prepare'),save=document.querySelector('#save'),approve=document.querySelector('#approve');
+const tell=(data)=>parent.postMessage(JSON.stringify({...data,channel}),location.origin);
+const photos={},crops={},points={}; let model=null,busy=false,prepared=false,texture=null,initialized=false;
+const scene=new THREE.Scene(), group=new THREE.Group();scene.add(group);
+const camera=new THREE.PerspectiveCamera(28,1,.001,100);
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.outputColorSpace=THREE.SRGBColorSpace;
+const preview=document.querySelector('#preview');preview.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff,0xaaaabb,2.5));const light=new THREE.DirectionalLight(0xffffff,1.5);light.position.set(2,3,5);scene.add(light);
+function render(){renderer.render(scene,camera)}
+function resize(){renderer.setSize(preview.clientWidth,preview.clientHeight);camera.aspect=preview.clientWidth/preview.clientHeight;camera.updateProjectionMatrix();render()}
+new ResizeObserver(resize).observe(preview);
+let drag=null;preview.onpointerdown=e=>{drag=e.clientX;preview.setPointerCapture(e.pointerId)};preview.onpointermove=e=>{if(drag!==null){group.rotation.y+=(e.clientX-drag)*.012;drag=e.clientX;render()}};preview.onpointerup=preview.onpointercancel=()=>drag=null;
+document.querySelector('#turn').onclick=()=>{group.rotation.y+=Math.PI;render()};
+function invalidate(){prepared=false;approve.checked=false;approve.disabled=true;save.disabled=true}
+function drawPhoto(side){const c=document.getElementById(side),ctx=c.getContext('2d'),im=photos[side];ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(im,0,0,c.width,c.height);const r=crops[side];if(r){ctx.fillStyle='#009b8030';ctx.fillRect(r.x*c.width,r.y*c.height,r.w*c.width,r.h*c.height);ctx.strokeStyle='#00a18b';ctx.lineWidth=3;ctx.strokeRect(r.x*c.width,r.y*c.height,r.w*c.width,r.h*c.height)}const p=points[side];if(p){ctx.fillStyle='#d84315';ctx.beginPath();ctx.arc(p.x*c.width,p.y*c.height,6,0,Math.PI*2);ctx.fill()}}
+async function imageFrom(data){const im=new Image();im.src=data;await im.decode();return im}
+function setPhoto(side,im){photos[side]=im;const c=document.getElementById(side);c.width=640;c.height=Math.round(640*im.height/im.width);drawPhoto(side);c.onpointerdown=e=>{if(busy)return;const b=c.getBoundingClientRect(),p={x:(e.clientX-b.left)/b.width,y:(e.clientY-b.top)/b.height};if(points[side]){const r=cropFromPoints(points[side],p);points[side]=null;if(validCrop(r))crops[side]=r}else{points[side]=p;delete crops[side]}invalidate();drawPhoto(side);prepare.disabled=!(model&&validCrop(crops.front)&&validCrop(crops.back));status.textContent=prepare.disabled?'Select two corners on both photos.':'Ready to update the 3D preview.'}}
+async function loadTemplate(){const response=await fetch('./templates/tshirtm.glb');if(!response.ok)throw Error('T-shirt template is missing.');const bytes=await response.arrayBuffer();const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');if(digest!==TEMPLATE_SHA256)throw Error('Template does not match the calibrated T-shirt.');const gltf=await new GLTFLoader().parseAsync(bytes,'');model=gltf.scene;let meshes=0;model.traverse(child=>{if(!child.isMesh)return;meshes++;const sleeves=child.material.name.startsWith('Photographed sleeve projection');const g=child.geometry.index?child.geometry.toNonIndexed():child.geometry.clone();g.setAttribute('uv',new THREE.BufferAttribute(projectionUV(g.attributes.position.array,g.attributes.normal.array,sleeves),2));g.deleteAttribute('uv1');child.geometry=g;child.material=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.85,metalness:0,side:THREE.DoubleSide});child.frustumCulled=false});if(meshes!==2)throw Error('Unexpected T-shirt mesh layout.');group.add(model);const box=new THREE.Box3().setFromObject(model),center=box.getCenter(new THREE.Vector3()),size=box.getSize(new THREE.Vector3());group.position.copy(center).multiplyScalar(-1);const dist=Math.max(size.y,size.x)*2.5;camera.position.set(0,0,dist);camera.lookAt(0,0,0);resize();document.querySelector('#turn').disabled=false}
+window.addEventListener('message',async event=>{if(event.origin!==location.origin||event.source!==parent||typeof event.data!=='string')return;let data;try{data=JSON.parse(event.data)}catch{return}if(data.channel!==channel)return;if(data.type==='tshirt-save-error'){busy=false;prepare.disabled=false;save.disabled=false;status.textContent=data.message;return}if(data.type!=='tshirt-input'||initialized)return;initialized=true;try{const [front,back]=await Promise.all([imageFrom(data.front),imageFrom(data.back),loadTemplate()]);setPhoto('front',front);setPhoto('back',back);status.textContent='Select the shirt body on each photo, then update the preview.'}catch(e){status.textContent=e.message;tell({type:'tshirt-error',message:e.message})}});
+prepare.onclick=()=>{try{invalidate();const atlas=drawAtlas(document.createElement('canvas'),photos.front,photos.back,crops.front,crops.back);const next=new THREE.CanvasTexture(atlas);next.flipY=false;next.colorSpace=THREE.SRGBColorSpace;model.traverse(c=>{if(c.isMesh){c.material.map=next;c.material.needsUpdate=true}});if(texture)texture.dispose();texture=next;prepared=true;approve.disabled=false;render();status.textContent='Review both sides. Adjust either crop and update again if needed.'}catch(e){status.textContent=e.message}};
+approve.onchange=()=>save.disabled=!(prepared&&approve.checked&&!busy);
+save.onclick=async()=>{if(!prepared||!approve.checked||busy)return;busy=true;save.disabled=prepare.disabled=true;try{status.textContent='Saving the textured model…';// Export model, not the centered/rotated preview group.
+const glb=await new GLTFExporter().parseAsync(model,{binary:true,onlyVisible:true});const bytes=new Uint8Array(glb);let binary='';for(let i=0;i<bytes.length;i+=32768)binary+=String.fromCharCode(...bytes.subarray(i,i+32768));tell({type:'tshirt-result',glb:btoa(binary),templateVersion:TEMPLATE_VERSION,frontCrop:crops.front,backCrop:crops.back})}catch(e){status.textContent=e.message;busy=false;prepare.disabled=false;save.disabled=false}};
+tell({type:'tshirt-ready'});
+</script></body></html>

@@ -50,6 +50,7 @@
 
   function candidateUrls(url) {
     if (!url) return [];
+    if (url.startsWith('blob:') || url.startsWith('data:')) return [url];
 
     const decoded = decodeURIComponent(url);
     const withoutLeadingSlash = decoded.replace(/^\//, '');

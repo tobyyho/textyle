@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Development-only 3D garment preview</title>
+  <style>
+    html, body { margin: 0; height: 100%; font: 14px system-ui, sans-serif; background: #f4f7fa; }
+    #wrap { height: 100%; display: flex; flex-direction: column; }
+    #status { padding: 8px 12px; min-height: 20px; color: #1d2228; }
+    #model { display: block; flex: 1; width: 100%; min-height: 200px; }
+    #controls { display: flex; justify-content: center; gap: 10px; padding: 8px; }
+    button { min-width: 80px; min-height: 38px; border: 1px solid #737d87; border-radius: 8px; background: white; }
+  </style>
+  <script type="module" src="/assets/packages/model_viewer_plus/assets/model-viewer.min.js"></script>
+</head>
+<body>
+  <div id="wrap">
+    <div id="status" role="status" aria-live="polite">Loading local 3D model…</div>
+    <model-viewer id="model" alt="Experimental T-shirt"
+      camera-controls disable-pan interaction-prompt="none"
+      camera-orbit="0deg 90deg auto" min-camera-orbit="auto 25deg auto"
+      max-camera-orbit="auto 155deg auto" exposure="1"></model-viewer>
+    <div id="controls">
+      <button id="zoomIn" type="button" aria-label="Zoom in" disabled>Zoom +</button>
+      <button id="zoomOut" type="button" aria-label="Zoom out" disabled>Zoom −</button>
+      <button id="reset" type="button" disabled>Reset view</button>
+    </div>
+  </div>
+  <script>
+    // Both routes are allowlisted. A query parameter can never select a URL.
+    const query = new URLSearchParams(location.search);
+    const fixture = query.get('fixture');
+    const saved = query.get('saved');
+    const model = document.getElementById('model');
+    const status = document.getElementById('status');
+    let blobUrl;
+    const unavailable = () => {
+      model.removeAttribute('src');
+      status.textContent = '3D preview unavailable. Return to the garment image.';
+      console.warn('m11-preview-model-unavailable');
+    };
+    const beginModel = (source) => {
+      model.src = source;
+      const started = performance.now();
+      model.addEventListener('load', () => {
+        status.textContent = '3D model ready. Drag to rotate or use Zoom + / Zoom −.';
+        for (const button of document.querySelectorAll('#controls button')) button.disabled = false;
+        console.info('m11-preview-loaded-ms', Math.round(performance.now() - started));
+      });
+      model.addEventListener('error', unavailable);
+      setTimeout(() => {
+        if (!model.loaded && status.textContent.startsWith('Loading')) {
+          status.textContent = '3D preview unavailable. Check the local fixture server or return to the garment image.';
+        }
+      }, 10000);
+    };
+    const savedAssets = Object.freeze({
+      m11_original_procedural_tshirt_v1: Object.freeze({
+        sha: '9818890dbdf9ea365d00036c1207ddebbd210a73e55df953916502d296f180bd',
+        url: 'http://127.0.0.1:8772/procedural-tshirt.glb', backRequired: false
+      }),
+      m11_auckland_photo_tshirt_v1: Object.freeze({
+        sha: 'c49b62acdf7a908aaaeb673c3e7091221468ca9a20a1f7b6d1f400f2300437cd',
+        url: 'http://127.0.0.1:8782/auckland.glb', backRequired: true
+      }),
+      m11_auckland_guided_20261026_v1: Object.freeze({
+        sha: 'c49b62acdf7a908aaaeb673c3e7091221468ca9a20a1f7b6d1f400f2300437cd',
+        url: 'http://127.0.0.1:8782/guided-auckland.glb', backRequired: true
+      }),
+      m11_muriwai_guided_20261029_v1: Object.freeze({
+        sha: '269f90c60d3479687d1b55ef8c1632f7e3374137e081bf95b0b056cb8c180120',
+        url: 'http://127.0.0.1:8782/guided-muriwai.glb', backRequired: true
+      }),
+      m11_auckland_copy_requested_20261029_v1: Object.freeze({
+        sha: 'c49b62acdf7a908aaaeb673c3e7091221468ca9a20a1f7b6d1f400f2300437cd',
+        url: 'http://127.0.0.1:8782/requested-auckland.glb', backRequired: true
+      })
+    });
+    function openExistingDb(name) {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(name);
+        request.onupgradeneeded = () => request.transaction.abort();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+    function getStored(db, store, key) {
+      return new Promise((resolve, reject) => {
+        const request = db.transaction(store, 'readonly').objectStore(store).get(key);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+    async function verifySavedRecord(association, savedAsset) {
+      let records, media;
+      try {
+        records = await openExistingDb('textyle.wardrobe-records.v1');
+        const encoded = await getStored(records, 'records', 'textyle.wardrobe.v2');
+        const items = JSON.parse(encoded);
+        if (!Array.isArray(items)) return false;
+        const matches = items.filter(item => item.id === saved);
+        if (matches.length !== 1 ||
+            matches[0].source?.createdAt !== association.createdAt ||
+            !matches[0].media?.frontOriginal?.startsWith(`indexeddb://${saved}/`)) return false;
+        media = await openExistingDb('textyle.garment-media.v1');
+        async function matchesHash(reference, expected) {
+          if (!reference?.startsWith(`indexeddb://${saved}/`) ||
+              !/^[0-9a-f]{64}$/.test(expected || '')) return false;
+          const bytes = await getStored(media, 'assets', reference);
+          if (!(bytes instanceof Uint8Array)) return false;
+          const digest = await crypto.subtle.digest('SHA-256', bytes);
+          const actual = [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
+          return actual === expected;
+        }
+        if (!await matchesHash(matches[0].media.frontOriginal, association.imageSha256)) return false;
+        return !savedAsset.backRequired ||
+          await matchesHash(matches[0].media.backOriginal, association.backImageSha256);
+      } catch (_) { return false; }
+      finally { records?.close(); media?.close(); }
+    }
+    async function loadSaved() {
+      let association;
+      try {
+        const multi = localStorage.getItem('m11.dev.saved-associations.v2');
+        if (multi) {
+          const registry = JSON.parse(multi);
+          if (registry?.schema !== 2 || !Array.isArray(registry.associations))
+            throw new Error('Invalid development registry');
+          const matches = registry.associations.filter(entry => entry?.itemId === saved);
+          if (matches.length !== 1) throw new Error('No unique saved association');
+          association = matches[0];
+        } else {
+          association = JSON.parse(localStorage.getItem('m11.dev.saved-association.v1'));
+        }
+      }
+      catch (_) { unavailable(); return; }
+      const savedAsset = Object.hasOwn(savedAssets, association?.assetId) ?
+        savedAssets[association.assetId] : null;
+      if (!association || association.schema !== 1 || association.itemId !== saved ||
+          !savedAsset || query.get('asset') !== association.assetId ||
+          association.glbSha256?.toLowerCase() !== savedAsset.sha ||
+          association.imageSha256?.toLowerCase() !== query.get('imageSha') ||
+          !/^[0-9a-f]{64}$/.test(query.get('imageSha') || '') ||
+          (savedAsset.backRequired &&
+            (association.backImageSha256?.toLowerCase() !== query.get('backImageSha') ||
+             !/^[0-9a-f]{64}$/.test(query.get('backImageSha') || ''))) ||
+          query.get('sha') !== savedAsset.sha) {
+        unavailable(); return;
+      }
+      if (!await verifySavedRecord(association, savedAsset)) { unavailable(); return; }
+      try {
+        const authorityResponse = await fetch('http://127.0.0.1:8782/m11/authority',
+          {cache: 'no-store', mode: 'cors'});
+        if (!authorityResponse.ok ||
+            !authorityResponse.headers.get('content-type')?.startsWith('application/json'))
+          throw new Error('Operator status unavailable');
+        const authority = await authorityResponse.json();
+        const approved = authority?.schema === 1 &&
+          authority.scope === 'private-development-only' &&
+          Array.isArray(authority.assets) &&
+          authority.assets.filter(entry => entry?.schema === 1 &&
+            typeof entry.runId === 'string' && entry.runId.length > 0 &&
+            entry.itemId === association.itemId &&
+            entry.createdAt === association.createdAt &&
+            entry.assetId === association.assetId &&
+            entry.glbSha256 === association.glbSha256 &&
+            entry.imageSha256 === association.imageSha256 &&
+            entry.backImageSha256 === association.backImageSha256).length === 1;
+        if (!approved) throw new Error('No operator-approved association');
+        const response = await fetch(savedAsset.url, {cache: 'no-store', mode: 'cors'});
+        if (!response.ok || !response.headers.get('content-type')?.startsWith('model/gltf-binary'))
+          throw new Error('Missing model or unexpected content type');
+        const bytes = await response.arrayBuffer();
+        const digest = await crypto.subtle.digest('SHA-256', bytes);
+        const actual = [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
+        if (actual !== savedAsset.sha) throw new Error('GLB hash mismatch');
+        if (new DataView(bytes).getUint32(0, true) !== 0x46546c67)
+          throw new Error('Invalid GLB header');
+        blobUrl = URL.createObjectURL(new Blob([bytes], {type: 'model/gltf-binary'}));
+        console.info('m11-saved-model-sha256-verified', actual);
+        beginModel(blobUrl);
+      } catch (error) {
+        console.warn('m11-saved-model-rejected', error.message);
+        unavailable();
+      }
+    }
+    if (saved && !fixture) loadSaved();
+    else if (fixture === 'm11_research_auckland_20261025' && !saved)
+      beginModel('http://127.0.0.1:8770/auckland.glb');
+    else status.textContent = 'No approved 3D fixture is associated with this garment.';
+    window.addEventListener('pagehide', () => { if (blobUrl) URL.revokeObjectURL(blobUrl); });
+    document.getElementById('zoomIn').addEventListener('click', () => {
+      const orbit = model.getCameraOrbit();
+      model.cameraOrbit = `${orbit.theta}rad ${orbit.phi}rad ${Math.max(0.4, orbit.radius * 0.8)}m`;
+    });
+    document.getElementById('zoomOut').addEventListener('click', () => {
+      const orbit = model.getCameraOrbit();
+      model.cameraOrbit = `${orbit.theta}rad ${orbit.phi}rad ${Math.min(8, orbit.radius * 1.25)}m`;
+    });
+    document.getElementById('reset').addEventListener('click', () => {
+      model.cameraOrbit = '0deg 90deg auto';
+    });
+  </script>
+</body>
+</html>

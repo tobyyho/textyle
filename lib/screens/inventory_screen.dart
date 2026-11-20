@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/inventory_store.dart';
 import '../models/clothing_item.dart';
 
@@ -14,7 +15,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final filtered = InventoryStore.items
+    final filtered = context.watch<InventoryStore>().items
         .where((item) => item.type == filter)
         .toList();
 
@@ -63,7 +64,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                             children: [
                               CircleAvatar(
                                 backgroundColor: Colors.black12,
-                                child: Text(item.color[0]),
+                                child: Text(item.colorLabel.isEmpty ? '?' : item.colorLabel[0]),
                               ),
                               const SizedBox(width: 12),
                               Column(
@@ -72,7 +73,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                   Text(item.name,
                                       style: const TextStyle(
                                           fontWeight: FontWeight.w600)),
-                                  Text(item.color,
+                                  Text(item.colorLabel,
                                       style: TextStyle(
                                           color: Colors.grey.shade600)),
                                 ],

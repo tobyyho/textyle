@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'inventory_screen.dart';
+import '../widgets/thread_messenger.dart';
 
 class AppShell extends StatefulWidget {
   final VoidCallback onLogout;
@@ -92,7 +93,7 @@ class HomeDashboard extends StatelessWidget {
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          ThreadMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Demo: Presenting outfit (spotlight + rotate)')),
                           );
                         },
@@ -103,7 +104,7 @@ class HomeDashboard extends StatelessWidget {
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          ThreadMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Demo: Outfit picker (coming next)')),
                           );
                         },
@@ -162,7 +163,7 @@ class UploadScreen extends StatelessWidget {
             const SizedBox(height: 20),
             FilledButton.icon(
               onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
+                ThreadMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Camera upload coming next')),
                 );
               },

@@ -62,7 +62,7 @@
     const initialBottomUrl = params.get('bottom') || '';
 
     const ROTATION_SENSITIVITY = 0.012;
-    const WORLD_VIEW_ZOOM = 1.3;
+    const WORLD_VIEW_ZOOM = 1.62;
 
     const statusElement = document.getElementById('status');
     const loader = new GLTFLoader();
@@ -111,6 +111,7 @@
     let currentAvatarUrl = initialAvatarUrl;
     let currentTopUrl = initialTopUrl;
     let currentBottomUrl = initialBottomUrl;
+    let displayedAvatarUrl = '', displayedTopUrl = '', displayedBottomUrl = '';
 
     let avatarLoadToken = 0;
     let topLoadToken = 0;
@@ -133,6 +134,7 @@
 
     function candidateUrls(url) {
       if (!url) return [];
+    if (url.startsWith('blob:') || url.startsWith('data:')) return [url];
 
       const decoded = decodeURIComponent(url);
       const withoutLeadingSlash = decoded.replace(/^\//, '');
@@ -216,7 +218,16 @@
 
     function clearGroup(group) {
       while (group.children.length > 0) {
-        group.remove(group.children[0]);
+        const old = group.children[0];
+        group.remove(old);
+        old.traverse(child => {
+          if (!child.isMesh) return;
+          child.geometry?.dispose();
+          for (const material of (Array.isArray(child.material) ? child.material : [child.material])) {
+            for (const value of Object.values(material || {})) if (value?.isTexture) value.dispose();
+            material?.dispose();
+          }
+        });
       }
     }
 
@@ -251,6 +262,7 @@
 
       if (!nextUrl) {
         clearGroup(avatarGroup);
+        displayedAvatarUrl = '';
         return;
       }
 
@@ -260,6 +272,7 @@
 
         clearGroup(avatarGroup);
         avatarGroup.add(avatar);
+        displayedAvatarUrl = nextUrl;
         hideStatus();
       } catch (error) {
         if (token !== avatarLoadToken) return;
@@ -271,9 +284,11 @@
       const nextUrl = url || '';
       currentTopUrl = nextUrl;
       const token = ++topLoadToken;
+      if (nextUrl === displayedTopUrl && topGroup.children.length) return;
 
       if (!nextUrl) {
         clearGroup(topGroup);
+        displayedTopUrl = '';
         return;
       }
 
@@ -284,6 +299,7 @@
         // Keep the old top visible until the new body-specific top is ready.
         clearGroup(topGroup);
         topGroup.add(top);
+        displayedTopUrl = nextUrl;
         hideStatus();
       } catch (error) {
         if (token !== topLoadToken) return;
@@ -296,9 +312,11 @@
       const nextUrl = url || '';
       currentBottomUrl = nextUrl;
       const token = ++bottomLoadToken;
+      if (nextUrl === displayedBottomUrl && bottomGroup.children.length) return;
 
       if (!nextUrl) {
         clearGroup(bottomGroup);
+        displayedBottomUrl = '';
         return;
       }
 
@@ -309,6 +327,7 @@
         // Keep the old bottom visible until the new body-specific bottom is ready.
         clearGroup(bottomGroup);
         bottomGroup.add(bottom);
+        displayedBottomUrl = nextUrl;
         hideStatus();
       } catch (error) {
         if (token !== bottomLoadToken) return;
@@ -321,6 +340,10 @@
       const nextAvatarUrl = avatarUrl || '';
       const nextTopUrl = topUrl || '';
       const nextBottomUrl = bottomUrl || '';
+      if (nextAvatarUrl === displayedAvatarUrl && avatarGroup.children.length) {
+        await Promise.all([replaceTop(nextTopUrl), replaceBottom(nextBottomUrl)]);
+        return;
+      }
 
       currentAvatarUrl = nextAvatarUrl;
       currentTopUrl = nextTopUrl;
@@ -379,6 +402,9 @@
         if (nextAvatar) avatarGroup.add(nextAvatar);
         if (nextTop) topGroup.add(nextTop);
         if (nextBottom) bottomGroup.add(nextBottom);
+        displayedAvatarUrl = nextAvatar ? nextAvatarUrl : '';
+        displayedTopUrl = nextTop ? nextTopUrl : '';
+        displayedBottomUrl = nextBottom ? nextBottomUrl : '';
 
         if (!cameraHasBeenFramed) {
           frameSceneOnce();
@@ -416,6 +442,7 @@
     }
 
     window.addEventListener('message', (event) => {
+      if (event.source !== parent || event.origin !== location.origin) return;
       const data = event.data;
       if (!data || typeof data !== 'object') return;
 
