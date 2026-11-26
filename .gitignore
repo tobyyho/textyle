@@ -10,3 +10,38 @@ build/
 
 # Local public cloud configuration
 config/cloud.local.json
+
+# Local environments and private runtime state
+.venv/
+.venv-mac/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+!.env.template
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.log
+config/cloud.local.json
+# Tailor runtime data and downloaded model weights
+tailor-ai/data/
+tailor-ai/datasets/
+tailor-ai/artifacts/
+tailor-ai/checkpoints/
+tailor-ai/models/
+tailor-ai/runs/
+tailor-ai/outputs/
+tailor-ai/cache/
+tailor-ai/tmp/
+tailor-ai/temp/
+tailor-ai/uploads/
+tailor-ai/**/*.pt
+tailor-ai/**/*.pth
+tailor-ai/**/*.ckpt
+tailor-ai/**/*.onnx
+tailor-ai/**/*.engine
+tailor-ai/**/*.safetensors
+tailor-ai/local-mac-freeze.txt

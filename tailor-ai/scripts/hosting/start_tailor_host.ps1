@@ -1,0 +1,10 @@
+param([switch]$DryRun)
+$ErrorActionPreference='Stop'; $project=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path; $python=Join-Path $project '.venv\Scripts\python.exe'; $state='C:\TextyleData\tailor\runtime\host'; $pidFile=Join-Path $state 'tailor.pid'; $key='C:\TextyleData\tailor\secrets\tailor_api_key.txt'; $artifact='C:\TextyleData\tailor\artifacts\runtime\tailor-prototype-v0.1\20260806-01'
+if($DryRun){[pscustomobject]@{Binding='127.0.0.1:8000';Workers=1;KeyExists=(Test-Path $key);ArtifactExists=(Test-Path $artifact);ChangesFirewall=$false;ChangesRouter=$false};exit}
+if(!(Test-Path $python) -or !(Test-Path $key) -or !(Test-Path (Join-Path $artifact 'best_model_state.pt'))){throw 'Virtual environment, key, or model artifact is missing.'}
+if(Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue){throw 'Port 8000 is already occupied.'}
+New-Item -ItemType Directory -Force -Path $state|Out-Null
+$env:TAILOR_RUNTIME_DIR=$artifact; $env:TAILOR_API_KEY_FILE=$key; $env:TAILOR_DEVICE='auto'; $log=Join-Path $state 'tailor-host.log'
+$process=Start-Process -FilePath $python -ArgumentList @('scripts\api\run_local_api.py') -WorkingDirectory $project -RedirectStandardOutput $log -RedirectStandardError (Join-Path $state 'tailor-host-error.log') -PassThru -WindowStyle Hidden
+for($i=0;$i -lt 60;$i++){try{$ready=Invoke-RestMethod 'http://127.0.0.1:8000/readyz' -TimeoutSec 2;if($ready.status -eq 'ready'){$listener=Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 8000 -State Listen -ErrorAction Stop | Select-Object -First 1;$listenerProcess=Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction Stop;if($listenerProcess.CommandLine -notlike '*scripts\api\run_local_api.py*'){throw 'Port 8000 listener is not Tailor.'};[IO.File]::WriteAllText($pidFile,[string]$listener.OwningProcess);Write-Host "Tailor ready at http://127.0.0.1:8000 (PID $($listener.OwningProcess)).";exit}}catch{};Start-Sleep -Milliseconds 500}
+Stop-Process -Id $process.Id -ErrorAction SilentlyContinue; Remove-Item -LiteralPath $pidFile -ErrorAction SilentlyContinue; throw 'Tailor did not become ready.'

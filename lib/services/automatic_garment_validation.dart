@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'finished_surface_proof.dart';
+import 'finished_mapping.dart';
 import '../models/clothing_item.dart';
 import 'automatic_template_registry.dart';
 import 'garment_media_store.dart';
@@ -34,14 +35,14 @@ Future<bool> partPhotoInputsCurrent(ClothingItem item, GarmentMediaStore store) 
       'displayFrontReference': item.media.frontNormalized, 'displayBackReference': item.media.backNormalized,
       'frontMaskReference': item.media.frontMask, 'backMaskReference': item.media.backMask,
     };
-    if (!(const <String>['calibrated_garment_parts_v1', 'calibrated_garment_parts_v2_solid_shell', 'calibrated_garment_parts_v3_hem_style', 'calibrated_garment_parts_v4_shared_fabric', 'calibrated_garment_parts_v5_plain_tee', 'calibrated_garment_parts_v6_user_male', 'calibrated_finished_models_v1']).contains(decoded['mappingVersion'])) return false;
+    if (!(const <String>['calibrated_garment_parts_v1', 'calibrated_garment_parts_v2_solid_shell', 'calibrated_garment_parts_v3_hem_style', 'calibrated_garment_parts_v4_shared_fabric', 'calibrated_garment_parts_v5_plain_tee', 'calibrated_garment_parts_v6_user_male', 'calibrated_finished_models_v1', 'canonical_material_panels_v1']).contains(decoded['mappingVersion'])) return false;
     if (isUserMaleTemplateVersion(template.version) && (decoded['mappingVersion'] != 'calibrated_garment_parts_v6_user_male' || decoded['suppliedGeometry'] is! Map || (decoded['suppliedGeometry'] as Map)['sha256'] != template.sha256 || (decoded['suppliedGeometry'] as Map)['preserved'] != true)) return false;
     if (isFinishedTemplateVersion(template.version)) {
       final selected = finishedStyleByVersion(template.version)!;
       final geometry = decoded['suppliedGeometry'];
       final fit = decoded['avatarFit'];
       final style = decoded['finalTemplateStyle'];
-      if (decoded['templateCatalog'] != 'finished_v1' || decoded['mappingVersion'] != 'calibrated_finished_models_v1' ||
+      if (decoded['templateCatalog'] != 'finished_v1' || !validFinishedMapping(decoded) ||
           geometry is! Map || geometry['sha256'] != template.sha256 || geometry['profile'] != template.profile ||
           geometry['preserved'] != true || geometry['style'] != selected.key ||
           fit is! Map || fit['bypassed'] != true || !validFinishedSurfaceProof(decoded['geometryAdjustment'], template.sha256) ||

@@ -1,0 +1,97 @@
+[
+  {
+    "version": "male_long_sleeve_photo_v1",
+    "profile": "male_average",
+    "category": "long_sleeve_top",
+    "filename": "male_long_sleeve_photo_v1.glb",
+    "sha256": "1ad88ff83cf964c6a714c9172bb9ed860e8526e5e810e31b09a544093affedac",
+    "parts": {
+      "body": [
+        2,
+        3,
+        6,
+        7,
+        8
+      ],
+      "left": [
+        1,
+        5
+      ],
+      "right": [
+        0,
+        4
+      ],
+      "nearest": [
+        9
+      ]
+    },
+    "sourceAsset": "male/tops/sweaterm.glb"
+  },
+  {
+    "version": "female_long_sleeve_photo_v1",
+    "profile": "female_average",
+    "category": "long_sleeve_top",
+    "filename": "female_long_sleeve_photo_v1.glb",
+    "sha256": "de1e2cde165eef7f2dc3674b9175ec8c3f336fdc86aeda6eba10c6934f8cf69e",
+    "parts": {
+      "body": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "left": [
+        0,
+        7
+      ],
+      "right": [
+        1,
+        8
+      ]
+    },
+    "sourceAsset": "female/tops/sweaternohoodief.glb"
+  },
+  {
+    "version": "male_trousers_photo_v1",
+    "profile": "male_average",
+    "category": "trousers",
+    "filename": "male_trousers_photo_v1.glb",
+    "sha256": "e23105bb337f9a9567259e5b622a0357b685f95bcf5f394bddf00ea5754d05fa",
+    "parts": {
+      "crotch_y": 0.785
+    },
+    "sourceAsset": "male/bottoms/jeans.glb"
+  },
+  {
+    "version": "female_trousers_photo_v1",
+    "profile": "female_average",
+    "category": "trousers",
+    "filename": "female_trousers_photo_v1.glb",
+    "sha256": "483274413143e14f2a676adb2fc8eaef55d3f104bc5c709bad15df647359cc0e",
+    "parts": {
+      "crotch_y": 0.83
+    },
+    "sourceAsset": "female/bottoms/skinnyjeansf.glb"
+  },
+  {
+    "version": "female_tshirt_auto_projection_v1",
+    "profile": "female_average",
+    "category": "short_sleeve_top",
+    "filename": "female_tshirt_auto_projection_v1.glb",
+    "sha256": "4dd12f793edefcb3188f566d6f8084e9e9c89bd51c7819dd933bf01640906143",
+    "parts": {
+      "body": [
+        0,
+        1
+      ],
+      "left": [
+        2
+      ],
+      "right": [
+        3
+      ]
+    },
+    "sourceAsset": "female/tops/tshirtf.glb"
+  }
+]

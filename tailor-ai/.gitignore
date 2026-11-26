@@ -1,0 +1,51 @@
+# Project-local Python environment
+.venv/
+
+# Python bytecode and tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local configuration and logs
+.env
+.env.*
+!.env.example
+*.log
+.ipynb_checkpoints/
+
+# Build outputs
+build/
+dist/
+*.egg-info/
+
+# Repository-root data and generated artifacts
+/data/
+/datasets/
+/artifacts/
+/checkpoints/
+/models/
+/runs/
+/outputs/
+/cache/
+/tmp/
+/temp/
+
+# Model and inference binaries
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.engine
+*.safetensors
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+
+# Mac-local runtime environment and install record
+.venv-mac/
+local-mac-freeze.txt

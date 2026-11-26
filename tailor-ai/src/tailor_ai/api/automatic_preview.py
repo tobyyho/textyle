@@ -1,0 +1,210 @@
+"""An additive upload -> segmentation -> fitted-template preview endpoint."""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+from pathlib import Path
+from tailor_ai.inference.garment_recognition import get_recognizer, RecognitionError, VERSION as RECOGNITION_VERSION
+
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
+
+from tailor_ai.digitization.images import prepare
+from tailor_ai.garment3d.photo_projection import ProjectionError, generate
+from tailor_ai.garment3d.garment_photo_projection import find_template, generate as generate_garment
+
+from tailor_ai.garment3d.closer_fit import fit_glb
+
+from tailor_ai.garment3d.user_male_projection import generate as generate_user_male, CATEGORIES as USER_MALE_CATEGORIES, STYLES as USER_MALE_STYLES
+
+from tailor_ai.garment3d.finished_projection import generate as generate_finished, category_supported as finished_category_supported, STYLES as FINISHED_STYLES
+
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+
+def _candidate_bytes(request: Request, candidate: dict, kind: str, source: bytes) -> bytes:
+    identity = candidate['identity']
+    if identity.get('source_image_sha256') != hashlib.sha256(source).hexdigest():
+        raise ProjectionError('Cutout does not match the uploaded photo.')
+    ref = candidate['preview_assets'].get(kind)
+    if not isinstance(ref, dict) or not isinstance(ref.get('id'), str):
+        raise ProjectionError('The automatic cutout is unavailable.')
+    path = request.app.state.asset_store.get(ref['id'])
+    if path is None:
+        raise ProjectionError('Cutout expired during generation. Retry the upload.')
+    data = Path(path).read_bytes()
+    sha = hashlib.sha256(data).hexdigest()
+    if sha != ref.get('sha256') or sha != identity.get({'normalized': 'normalized_image_sha256', 'mask': 'mask_sha256'}[kind]):
+        raise ProjectionError('Cutout identity mismatch.')
+    return data
+
+
+def register_automatic_preview(app: FastAPI, *, require_key, get_digitizer) -> None:
+    @app.post('/api/v1/clothing/automatic-preview')
+    async def automatic_preview(
+        request: Request,
+        front_image: UploadFile = File(...),
+        back_image: UploadFile = File(...),
+        body_profile: str = Form(...),
+        garment_id: str = Form(...),
+        source: str = Form('closet_camera'),
+        confirmed_category: str | None = Form(None),
+        long_sleeve_style: str = Form('auto'),
+        male_template_style: str = Form('auto'),
+        template_catalog: str = Form('legacy'),
+        final_template_style: str = Form('auto'),
+        x_api_key: str | None = Header(None, alias='X-API-Key'),
+    ) -> JSONResponse:
+        require_key(request, x_api_key)
+        if template_catalog not in {'legacy','finished_v1'}:
+            raise HTTPException(422,'Unknown template catalog.')
+        if template_catalog=='legacy' and final_template_style!='auto':
+            raise HTTPException(422,'Choose the finished catalog to select a finished model.')
+        if template_catalog=='finished_v1':
+            if male_template_style!='auto':
+                raise HTTPException(422,'Legacy and finished template choices cannot be combined.')
+            if final_template_style!='auto' and (body_profile,final_template_style) not in FINISHED_STYLES:
+                raise HTTPException(422,'That finished model is unavailable for this avatar.')
+        if male_template_style!='auto' and (body_profile!='male_average' or male_template_style not in USER_MALE_STYLES):
+            raise HTTPException(422,'Invalid male garment style.')
+        if long_sleeve_style not in {'auto','tee','sweater'}:
+            raise HTTPException(422, 'Invalid long-sleeve style.')
+        if body_profile not in {'male_average', 'female_average'}:
+            raise HTTPException(422, 'No calibrated automatic template is installed for this avatar yet.')
+        if not garment_id or len(garment_id) > 128 or source not in {'mobile_camera', 'closet_camera'}:
+            raise HTTPException(400, 'Invalid garment identity or source.')
+        if confirmed_category is not None and confirmed_category not in {'short_sleeve_top', 'long_sleeve_top', 'trousers','shorts','skirt','outerwear'}:
+            raise HTTPException(422, 'Choose a supported garment type.')
+        request.app.state.digitization_limiter.check(hash(x_api_key))
+        request.app.state.garment3d_limiter.check(hash(x_api_key))
+        front, back = await asyncio.gather(front_image.read(MAX_IMAGE_BYTES + 1), back_image.read(MAX_IMAGE_BYTES + 1))
+        if not front or not back or max(len(front), len(back)) > MAX_IMAGE_BYTES:
+            raise HTTPException(413, 'Provide front and back images of at most 10 MiB each.')
+        try:
+            await asyncio.wait_for(request.app.state.semaphore.acquire(), timeout=.1)
+        except TimeoutError as error:
+            raise HTTPException(503, 'Tailor is busy; retry shortly.') from error
+        try:
+            runtime = request.app.state.runtime
+            prepared_front = await asyncio.to_thread(prepare, front)
+            prepared_back = await asyncio.to_thread(prepare, back)
+            decoded = await asyncio.to_thread(runtime.decode, prepared_front.classifier_data)
+            await asyncio.to_thread(runtime.decode, prepared_back.classifier_data)
+            classification = await asyncio.to_thread(runtime.predict, decoded)
+            original_classification = dict(classification)
+            resolution = {'source': 'model', 'confirmed_category': None}
+            if confirmed_category is not None:
+                # User choice resolves the type, not the model's uncertainty.
+                # Retain the unmodified model output and matched probability.
+                match = next((p.get('confidence', 0.0) for p in classification.get('top_predictions', [])
+                              if p.get('category') == confirmed_category), 0.0)
+                classification = dict(classification, category=confirmed_category, confidence=match,
+                    abstained=False, sleeve_type={'short_sleeve_top':'short_sleeve',
+                        'long_sleeve_top':'long_sleeve', 'trousers':'not_applicable','shorts':'not_applicable','skirt':'not_applicable','outerwear':'long_sleeve'}[confirmed_category])
+                resolution = {'source': 'user', 'confirmed_category': confirmed_category}
+            category = classification.get('category')
+            automatic_finished = template_catalog == 'finished_v1' and final_template_style == 'auto' and confirmed_category is None
+            if classification.get('abstained') and not automatic_finished:
+                raise HTTPException(422, 'The garment category is uncertain. Choose its type below and retry processing.')
+            supplied_finished = template_catalog=='finished_v1'
+            if supplied_finished and not automatic_finished and not finished_category_supported(body_profile,category):
+                raise HTTPException(422,'No finished model supports this garment type for your avatar. Choose a matching 3D garment style.')
+            legacy_tshirt = body_profile == 'male_average' and category == 'short_sleeve_top'
+            supplied_male = not supplied_finished and body_profile=='male_average' and category in USER_MALE_CATEGORIES
+            if not supplied_finished and not supplied_male and not legacy_tshirt:
+                try:
+                    find_template(body_profile, category)
+                except ProjectionError as error:
+                    raise HTTPException(422, str(error)) from error
+            digitizer = await get_digitizer(request)
+            result = await asyncio.to_thread(digitizer.process, prepared_front, prepared_back, classification, allow_plain_background=True)
+            candidates = result.get('views', {})
+            if not all(isinstance(candidates.get(view), dict) and candidates[view].get('segmentation', {}).get('candidate_accepted') is True for view in ('front', 'back')):
+                raise HTTPException(422, ('A garment cutout did not pass automatic checks. Retake front and back against a plain background with the full garment visible.' + ' Diagnostics: ' + str({v: candidates.get(v, {}).get('segmentation', {}) for v in ('front', 'back')})))
+            try:
+                front_png = _candidate_bytes(request, candidates['front'], 'normalized', front)
+                back_png = _candidate_bytes(request, candidates['back'], 'normalized', back)
+                front_mask = _candidate_bytes(request, candidates['front'], 'mask', front)
+                back_mask = _candidate_bytes(request, candidates['back'], 'mask', back)
+                recognition = None
+                generated_style = final_template_style
+                if automatic_finished:
+                    recognizer = await asyncio.to_thread(get_recognizer)
+                    recognition = await asyncio.to_thread(recognizer.recognize,
+                        front_png, back_png, front_mask, back_mask, body_profile, list(FINISHED_STYLES.values()))
+                    category = recognition['category']
+                    generated_style = recognition['style']
+                    selected = FINISHED_STYLES.get((body_profile, generated_style))
+                    if selected is None or selected['category'] != category:
+                        raise RecognitionError('No matching model is available for this garment and avatar.')
+                    # The new recognizer ranks similarities; never invent a
+                    # calibrated probability or pretend this was a user choice.
+                    classification = dict(classification, category=category, confidence=0.0,
+                        abstained=False, sleeve_type={'short_sleeve_top':'short_sleeve',
+                            'long_sleeve_top':'long_sleeve','outerwear':'long_sleeve'}.get(category,'not_applicable'))
+                    resolution = {'source':'fashion_model', 'confirmed_category':None,
+                        'model_version':RECOGNITION_VERSION, 'confidence_available':False}
+                    from tailor_ai.digitization.season import suggest
+                    seasons, role = suggest(category)
+                    result['attributes']['suggested_seasons'] = seasons
+                    result['attributes']['layer_role'] = role
+                if supplied_finished:
+                    glb, sidecar = await asyncio.to_thread(generate_finished, body_profile, category,
+                        front_png, back_png, front_mask, back_mask, front, back,
+                        final_template_style=generated_style,long_sleeve_style=long_sleeve_style,
+                        appearance_policy=recognition.get('construction_details', {}).get('pattern') if recognition else None)
+                    if recognition is not None:
+                        sidecar['finalTemplateStyle'].update(requested='auto', source='fashion_model')
+                        sidecar['automaticRecognition'] = recognition
+                        if sidecar.get('hemStyle'):
+                            sidecar['hemStyle'].update(requested=long_sleeve_style,source='fashion_model',
+                                uncertain=recognition['style_uncertain'])
+                        if recognition['style_uncertain']:
+                            sidecar['warnings'].append('closest_template_style_approximate')
+                elif supplied_male:
+                    glb, sidecar = await asyncio.to_thread(generate_user_male, category,
+                        front_png, back_png, front_mask, back_mask, front, back,
+                        male_template_style=male_template_style,long_sleeve_style=long_sleeve_style)
+                elif legacy_tshirt:
+                    glb, sidecar = await asyncio.to_thread(generate, front_png, back_png, front_mask, back_mask, front, back)
+                else:
+                    glb, sidecar = await asyncio.to_thread(generate_garment, body_profile, category,
+                        front_png, back_png, front_mask, back_mask, front, back,
+                        long_sleeve_style=long_sleeve_style if category=='long_sleeve_top' else None)
+                if not supplied_male and not supplied_finished:
+                    glb, fit_details = await asyncio.to_thread(fit_glb, glb, body_profile, category,
+                        sidecar.get('hemStyle', {}).get('resolved'))
+                    sidecar['avatarFit'] = fit_details
+                    sidecar['glbSha256'] = hashlib.sha256(glb).hexdigest()
+            except RecognitionError as error:
+                raise HTTPException(422, str(error)) from error
+            except (ProjectionError, FileNotFoundError, ValueError) as error:
+                raise HTTPException(422, str(error)) from error
+            sidecar['categoryResolution'] = resolution
+            sidecar['originalClassification'] = original_classification
+            sidecar['garmentId'] = garment_id
+            sidecar['segmentationCandidatesAccepted'] = True
+            sidecar_bytes = json.dumps(sidecar, sort_keys=True, separators=(',', ':')).encode()
+            asset_id = request.app.state.garment3d_store.put(glb, sidecar_bytes)
+            base = f'/api/v1/clothing/3d/assets/{asset_id}'
+            ttl = request.app.state.garment3d_store.ttl_seconds
+            def ref(kind: str, data: bytes) -> dict:
+                return {'id': f'{asset_id}/{kind}', 'url': f'{base}/{kind}',
+                        'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data), 'expires_in_seconds': ttl}
+            result.update(
+                request_id=request.state.request_id, api_version='v1', status='preview_generated',
+                classification={'category': classification['category'], 'confidence': classification['confidence'],
+                                'abstained': classification['abstained'], 'top_predictions': classification['top_predictions'],
+                                'sleeve_type': classification['sleeve_type'], 'model_version': RECOGNITION_VERSION if recognition else '0.1',
+                                'resolution': resolution, 'original_model_prediction': original_classification},
+                generated_preview={'template_version': sidecar['templateVersion'], 'body_profile': body_profile,
+                                   'garment_id': garment_id, 'user_approved': False, 'automatic_recognition': recognition, 'category_resolution': resolution, 'hem_style': sidecar.get('hemStyle'), 'male_template_style': sidecar.get('maleTemplateStyle'), 'final_template_style': sidecar.get('finalTemplateStyle'), 'template_catalog': sidecar.get('templateCatalog'),
+                                   'glb': ref('glb', glb), 'sidecar': ref('sidecar', sidecar_bytes)},
+            )
+            result['readiness']['automatic_preview_ready'] = True
+            result['warnings'] = list(dict.fromkeys(result.get('warnings', []) + sidecar['warnings']))
+            # All pre-existing visual-approval/readiness fields remain untouched.
+            return JSONResponse(result)
+        finally:
+            request.app.state.semaphore.release()

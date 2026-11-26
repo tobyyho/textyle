@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tailor API v1</title><link rel="stylesheet" href="/static/styles.css"></head>
+<body><main><header><p class="eyebrow">LOCAL API REFERENCE</p><h1>Tailor API v1</h1></header>
+<section class="alert"><strong>Tailor baseline v0.1 does not support sleeveless_top.</strong></section>
+<section class="card"><h2>Endpoints</h2><p><code>GET /healthz</code> process liveness</p><p><code>GET /readyz</code> verified model readiness</p><p><code>GET /api/v1/model</code> model metadata</p><p><code>GET /api/v1/categories</code> taxonomy metadata</p><p><code>POST /api/v1/clothing/classify</code> multipart classification; requires <code>X-API-Key</code></p><p><a href="/openapi.json">OpenAPI 3.1 schema</a></p></section>
+<section class="card"><h2>Classification fields</h2><p>Required: <code>front_image</code>. Optional: <code>back_image</code>, <code>source</code>, and <code>client_request_id</code>. The back image is accepted but ignored by model v0.1.</p></section><p><a href="/">Return to Tailor</a></p></main></body></html>

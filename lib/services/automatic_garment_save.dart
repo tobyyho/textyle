@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'finished_surface_proof.dart';
+import 'finished_mapping.dart';
 import 'dart:typed_data';
 import '../models/clothing_item.dart';
 import 'automatic_preview_client.dart';
@@ -70,7 +71,7 @@ Future<ClothingItem> saveAutomaticGarment({
     final style = sidecar['finalTemplateStyle'];
     final previewStyle = preview['final_template_style'];
     if (sidecar['templateCatalog'] != 'finished_v1' || preview['template_catalog'] != 'finished_v1' ||
-        sidecar['mappingVersion'] != 'calibrated_finished_models_v1' ||
+        !validFinishedMapping(sidecar) ||
         geometry is! Map || geometry['sha256'] != template.sha256 || geometry['profile'] != profile ||
         geometry['preserved'] != true || geometry['style'] != selected.key ||
         fit is! Map || fit['bypassed'] != true || !validFinishedSurfaceProof(sidecar['geometryAdjustment'], template.sha256) ||
@@ -111,7 +112,7 @@ Future<ClothingItem> saveAutomaticGarment({
     'frontMaskSha256': mediaHash(downloaded['front-mask']!),
     'backMaskSha256': mediaHash(downloaded['back-mask']!),
   };
-  if (!template.isLegacyTshirt && (!(const <String>['calibrated_garment_parts_v1', 'calibrated_garment_parts_v2_solid_shell', 'calibrated_garment_parts_v3_hem_style', 'calibrated_garment_parts_v4_shared_fabric', 'calibrated_garment_parts_v5_plain_tee', 'calibrated_garment_parts_v6_user_male', 'calibrated_finished_models_v1']).contains(sidecar['mappingVersion']) || sidecar['partMapping'] is! Map)) {
+  if (!template.isLegacyTshirt && (!(const <String>['calibrated_garment_parts_v1', 'calibrated_garment_parts_v2_solid_shell', 'calibrated_garment_parts_v3_hem_style', 'calibrated_garment_parts_v4_shared_fabric', 'calibrated_garment_parts_v5_plain_tee', 'calibrated_garment_parts_v6_user_male', 'calibrated_finished_models_v1', 'canonical_material_panels_v1']).contains(sidecar['mappingVersion']) || sidecar['partMapping'] is! Map)) {
     throw const FormatException('Garment part mapping is missing or incompatible.');
   }
   if (isUserMaleTemplateVersion(template.version) && (sidecar['mappingVersion'] != 'calibrated_garment_parts_v6_user_male' || sidecar['suppliedGeometry'] is! Map || (sidecar['suppliedGeometry'] as Map)['sha256'] != template.sha256 || (sidecar['suppliedGeometry'] as Map)['preserved'] != true)) throw const FormatException('Supplied garment geometry identity is missing.');
@@ -128,7 +129,7 @@ Future<ClothingItem> saveAutomaticGarment({
       throw const FormatException('Garment-type confirmation provenance is missing.');
     }
   }
-  if ((const ['calibrated_garment_parts_v3_hem_style', 'calibrated_garment_parts_v4_shared_fabric', 'calibrated_garment_parts_v5_plain_tee', 'calibrated_garment_parts_v6_user_male', 'calibrated_finished_models_v1']).contains(sidecar['mappingVersion']) && template.category == GarmentCategory.longSleeveTop) {
+  if ((const ['calibrated_garment_parts_v3_hem_style', 'calibrated_garment_parts_v4_shared_fabric', 'calibrated_garment_parts_v5_plain_tee', 'calibrated_garment_parts_v6_user_male', 'calibrated_finished_models_v1', 'canonical_material_panels_v1']).contains(sidecar['mappingVersion']) && template.category == GarmentCategory.longSleeveTop) {
     final hem = sidecar['hemStyle'];
     final previewHem = preview['hem_style'];
     if (hem is! Map || previewHem is! Map || hem['requested'] != longSleeveStyle ||

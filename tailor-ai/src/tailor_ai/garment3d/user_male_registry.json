@@ -1,0 +1,79 @@
+[
+  {
+    "style": "tshirt",
+    "label": "T-shirt",
+    "version": "male_user_tshirt_v1",
+    "filename": "user_male_templates/tshirt.glb",
+    "originalFilename": "tshirtm(1).glb",
+    "category": "short_sleeve_top",
+    "profile": "male_average",
+    "sha256": "520b39f5e4ba332a65726be488c6417df34f4bf23be1bcefb1c21c0ea8d2ad0e",
+    "method": "automatic_photo_parts_v1"
+  },
+  {
+    "style": "long_tee",
+    "label": "Long-sleeve T-shirt",
+    "version": "male_user_long_tee_v1",
+    "filename": "user_male_templates/long_tee.glb",
+    "originalFilename": "longsleevetshirtmale(1).glb",
+    "category": "long_sleeve_top",
+    "profile": "male_average",
+    "sha256": "cad08f9a33d937f43360baf9e130d11d7e21415424c3384836dc6ab2122e7ca0",
+    "method": "automatic_photo_parts_v1"
+  },
+  {
+    "style": "sweater",
+    "label": "Sweater",
+    "version": "male_user_sweater_v1",
+    "filename": "user_male_templates/sweater.glb",
+    "originalFilename": "sweatermale.glb",
+    "category": "long_sleeve_top",
+    "profile": "male_average",
+    "sha256": "2888e434751b96b2a7ccb8c0b7a8a3eaa5b961d26351044473790b5755d75122",
+    "method": "automatic_photo_parts_v1"
+  },
+  {
+    "style": "jeans",
+    "label": "Jeans",
+    "version": "male_user_jeans_v1",
+    "filename": "user_male_templates/jeans.glb",
+    "originalFilename": "jeans(1).glb",
+    "category": "trousers",
+    "profile": "male_average",
+    "sha256": "e23105bb337f9a9567259e5b622a0357b685f95bcf5f394bddf00ea5754d05fa",
+    "method": "automatic_photo_parts_v1"
+  },
+  {
+    "style": "black_pants",
+    "label": "Black pants",
+    "version": "male_user_black_pants_v1",
+    "filename": "user_male_templates/black_pants.glb",
+    "originalFilename": "blackpants.glb",
+    "category": "trousers",
+    "profile": "male_average",
+    "sha256": "12baee3ef12af409797e6454218bf72bd72ffdcbd2380c888242c72d9b6b736d",
+    "method": "automatic_photo_parts_v1"
+  },
+  {
+    "style": "ankle_sweats",
+    "label": "Cuffed sweatpants",
+    "version": "male_user_ankle_sweats_v1",
+    "filename": "user_male_templates/ankle_sweats.glb",
+    "originalFilename": "anklesweatsmale.glb",
+    "category": "trousers",
+    "profile": "male_average",
+    "sha256": "fc300bc83fc6c730e7cc891e0b631b84835bd666f4098289dc77e5bd9dec690d",
+    "method": "automatic_photo_parts_v1"
+  },
+  {
+    "style": "shorts",
+    "label": "Shorts",
+    "version": "male_user_shorts_v1",
+    "filename": "user_male_templates/shorts.glb",
+    "originalFilename": "shortsmale.glb",
+    "category": "shorts",
+    "profile": "male_average",
+    "sha256": "f02703194cb75bcdfa868b1cae170c26c118ec0c852cee7ffb61afaee8b8eee5",
+    "method": "automatic_photo_parts_v1"
+  }
+]

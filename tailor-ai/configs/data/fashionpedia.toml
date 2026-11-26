@@ -1,0 +1,75 @@
+[dataset]
+name = "Fashionpedia"
+release = "2020-v1.0"
+manifest_version = "fashionpedia-2020-v1.0-tailor-v1"
+official_project = "https://fashionpedia.github.io/home/"
+official_repository = "https://github.com/cvdfoundation/fashionpedia"
+official_terms = "https://fashionpedia.github.io/home/data_license.html"
+official_bucket = "https://s3.amazonaws.com/ifashionist-dataset"
+
+[paths]
+download_root = "C:/TextyleData/tailor/cache/downloads/fashionpedia/2020-v1.0"
+extraction_root = "C:/TextyleData/tailor/cache/extraction/fashionpedia/2020-v1.0"
+raw_root = "C:/TextyleData/tailor/data/raw/fashionpedia/2020-v1.0"
+manifest_root = "C:/TextyleData/tailor/data/manifests/fashionpedia/fashionpedia-2020-v1.0-tailor-v1"
+processed_root = "C:/TextyleData/tailor/data/processed/fashionpedia/fashionpedia-2020-v1.0-tailor-v1"
+audit_root = "C:/TextyleData/tailor/artifacts/data_audits/fashionpedia/20260806-milestone3"
+
+[split]
+seed = 20260806
+train = 0.70
+validation = 0.15
+test = 0.15
+
+[classes]
+supervised = [
+  "short_sleeve_top",
+  "long_sleeve_top",
+  "sleeveless_top",
+  "outerwear",
+  "shorts",
+  "trousers",
+  "skirt",
+  "dress",
+]
+unknown_policy = "rejection_only"
+
+[category_mapping]
+"0" = { source_name = "shirt, blouse", status = "sleeve_required" }
+"1" = { source_name = "top, t-shirt, sweatshirt", status = "sleeve_required" }
+"2" = { source_name = "sweater", status = "sleeve_required" }
+"3" = { source_name = "cardigan", status = "included", tailor_category = "outerwear" }
+"4" = { source_name = "jacket", status = "included", tailor_category = "outerwear" }
+"5" = { source_name = "vest", status = "excluded_ambiguous_vest" }
+"6" = { source_name = "pants", status = "included", tailor_category = "trousers" }
+"7" = { source_name = "shorts", status = "included", tailor_category = "shorts" }
+"8" = { source_name = "skirt", status = "included", tailor_category = "skirt" }
+"9" = { source_name = "coat", status = "included", tailor_category = "outerwear" }
+"10" = { source_name = "dress", status = "included", tailor_category = "dress" }
+"11" = { source_name = "jumpsuit", status = "excluded_ambiguous_one_piece" }
+"12" = { source_name = "cape", status = "included", tailor_category = "outerwear" }
+
+[sleeve_mapping]
+"156" = { source_name = "sleeveless", tailor_sleeve = "sleeveless" }
+"157" = { source_name = "short (length)", tailor_sleeve = "short_sleeve" }
+"158" = { source_name = "elbow-length", tailor_sleeve = "long_sleeve" }
+"159" = { source_name = "three quarter (length)", tailor_sleeve = "long_sleeve" }
+"160" = { source_name = "wrist-length", tailor_sleeve = "long_sleeve" }
+
+[quality]
+minimum_box_width = 32
+minimum_box_height = 32
+minimum_box_area_ratio = 0.01
+crop_padding = 0.10
+jpeg_quality = 94
+suspicious_tiny_dimension = 64
+
+[sampling]
+smoke_target = 1200
+pilot_target = 12000
+minimum_per_class = 300
+preferred_minimum_per_class = 500
+
+[storage]
+minimum_free_gib = 100
+preferred_free_gib = 300

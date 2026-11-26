@@ -1,0 +1,1 @@
+record_id,source_dataset,source_version,source_image_id,source_item_id,source_category_id,source_category_name,tailor_category,derived_sleeve_type,image_path,bounding_box_available,segmentation_available,viewpoint,occlusion,scale,split_group_id,source_split,split,licence_status,source_reference,sha256,width,height,quality_flags,mapping_version,review_status

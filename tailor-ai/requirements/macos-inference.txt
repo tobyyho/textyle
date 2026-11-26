@@ -1,0 +1,10 @@
+# Native macOS wheels from PyPI; do not include base.txt or environment-lock.txt.
+# Let torchvision choose its compatible stable PyTorch dependency. Setup records
+# installed versions after resolution. CPU first; no CUDA wheels or training data.
+torch
+torchvision
+numpy==2.4.4
+pillow==12.2.0
+-r api.txt
+-r digitization.txt
+-r garment3d.txt

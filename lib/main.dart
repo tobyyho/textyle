@@ -33,6 +33,7 @@ import 'screens/automatic_garment_upload_page.dart';
 import 'screens/toby_garment_actions.dart';
 import 'screens/toby_outfit_tools.dart';
 import 'widgets/thread_messenger.dart';
+import 'widgets/retained_tab.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -1835,7 +1836,7 @@ class _MainScaffoldState extends State<MainScaffold> {
     _pageController = PageController(initialPage: index);
     pages = [
       const InventoryPage(),
-      const HomePage(),
+      const RetainedTab(child: HomePage()),
       UploadPage(onSaved: () => _goToPage(0)),
     ];
   }

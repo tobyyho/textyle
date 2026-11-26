@@ -1,0 +1,3 @@
+# M10 deterministic local garment geometry; existing NumPy 2.4.4 retained.
+scipy==1.17.0
+trimesh==5.1.1

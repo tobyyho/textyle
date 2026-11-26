@@ -1,0 +1,23 @@
+# Normalize ordinary text to LF for cross-platform consistency.
+* text=auto eol=lf
+
+# Preserve Windows command-script line endings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Common binary formats must not be line-ending normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.7z binary
+*.pt binary
+*.pth binary
+*.ckpt binary
+*.onnx binary
+*.engine binary
+*.safetensors binary

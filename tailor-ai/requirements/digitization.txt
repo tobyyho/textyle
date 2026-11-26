@@ -1,0 +1,2 @@
+# Native PyTorch SAM 2 adapter; official model weights are cached outside Git.
+transformers==5.17.0

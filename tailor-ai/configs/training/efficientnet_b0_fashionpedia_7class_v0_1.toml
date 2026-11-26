@@ -1,0 +1,61 @@
+[model]
+name = "efficientnet_b0"
+version = "0.1"
+weight_enum = "EfficientNet_B0_Weights.DEFAULT"
+class_order = ["short_sleeve_top", "long_sleeve_top", "outerwear", "shorts", "trousers", "skirt", "dress"]
+supported_categories = ["short_sleeve_top", "long_sleeve_top", "outerwear", "shorts", "trousers", "skirt", "dress"]
+unsupported_categories = ["sleeveless_top"]
+non_logit_outcomes = ["unknown"]
+
+[paths]
+pilot_manifest = "C:/TextyleData/tailor/data/manifests/fashionpedia/fashionpedia-2020-v1.0-tailor-v1/pilot_manifest.csv"
+smoke_manifest = "C:/TextyleData/tailor/data/manifests/fashionpedia/fashionpedia-2020-v1.0-tailor-v1/smoke_manifest.csv"
+baseline_manifest = "C:/TextyleData/tailor/data/manifests/fashionpedia/fashionpedia-2020-v1.0-tailor-v1/tailor_baseline_v0_1_7class.csv"
+smoke_baseline_manifest = "C:/TextyleData/tailor/data/manifests/fashionpedia/fashionpedia-2020-v1.0-tailor-v1/tailor_smoke_v0_1_7class.csv"
+unsupported_probe_manifest = "C:/TextyleData/tailor/data/manifests/fashionpedia/fashionpedia-2020-v1.0-tailor-v1/tailor_unsupported_sleeveless_probe_v0_1.csv"
+processed_root = "C:/TextyleData/tailor/data/processed/fashionpedia/fashionpedia-2020-v1.0-tailor-v1"
+artifact_root = "C:/TextyleData/tailor/artifacts/models/efficientnet_b0_fashionpedia_7class_v0_1"
+weight_cache = "C:/TextyleData/tailor/cache/torch/hub/checkpoints"
+
+[training]
+seed = 20260806
+image_size = 224
+batch_size = 128
+workers = 2
+smoke_epochs = 2
+warmup_epochs = 3
+finetune_epochs = 15
+warmup_learning_rate = 0.001
+finetune_learning_rate = 0.0001
+weight_decay = 0.0001
+label_smoothing = 0.1
+loss_weighting = "inverse_sqrt_mean_normalized"
+early_stopping_patience = 4
+checkpoint_metric = "validation_macro_f1"
+gradient_clip_norm = 1.0
+amp = true
+
+[scheduler]
+factor = 0.5
+patience = 2
+minimum_learning_rate = 0.000001
+
+[transforms]
+random_resized_crop_scale = [0.80, 1.00]
+random_resized_crop_ratio = [0.90, 1.10]
+horizontal_flip_probability = 0.5
+rotation_degrees = 10.0
+color_jitter_brightness = 0.10
+color_jitter_contrast = 0.10
+color_jitter_saturation = 0.10
+resize_size = 256
+crop_size = 224
+normalization_mean = [0.485, 0.456, 0.406]
+normalization_std = [0.229, 0.224, 0.225]
+
+[evaluation]
+ece_bins = 15
+confidence_thresholds = [0.50, 0.60, 0.70, 0.75, 0.80, 0.90]
+
+[storage]
+minimum_free_gib = 100
