@@ -447,11 +447,19 @@
       if (!data || typeof data !== 'object') return;
 
       if (data.type === 'textyle-set-body-outfit') {
+        if (Number.isFinite(data.rotationDeltaX)) {
+          sceneGroup.rotation.y = data.rotationDeltaX * ROTATION_SENSITIVITY;
+        }
         replaceBodyOutfit(
           String(data.avatar || ''),
           String(data.top || ''),
           String(data.bottom || ''),
         );
+        return;
+      }
+
+      if (data.type === 'textyle-set-view-rotation' && Number.isFinite(data.rotationDeltaX)) {
+        sceneGroup.rotation.y = data.rotationDeltaX * ROTATION_SENSITIVITY;
         return;
       }
 

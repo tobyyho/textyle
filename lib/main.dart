@@ -1828,17 +1828,13 @@ class MainScaffold extends StatefulWidget {
 class _MainScaffoldState extends State<MainScaffold> {
   int index = 1;
   late final PageController _pageController;
-  late final List<Widget> pages;
+  late final Widget _uploadPage;
 
   @override
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: index);
-    pages = [
-      const InventoryPage(),
-      const RetainedTab(child: HomePage()),
-      UploadPage(onSaved: () => _goToPage(0)),
-    ];
+    _uploadPage = UploadPage(onSaved: () => _goToPage(0));
   }
 
   @override
@@ -1880,7 +1876,11 @@ Widget build(BuildContext context) {
               onPageChanged: (value) {
                 setState(() => index = value);
               },
-              children: pages,
+              children: [
+                const InventoryPage(),
+                RetainedTab(child: HomePage(viewerActive: index == 1)),
+                _uploadPage,
+              ],
             ),
           ),
         ),
@@ -2215,7 +2215,9 @@ class SavedOutfit {
 /// ---------- Home ----------
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, this.viewerActive = true});
+
+  final bool viewerActive;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -2646,6 +2648,7 @@ Widget build(BuildContext context) {
             const SizedBox(height: 28),
 
             _FloatingOutfitHero(
+              viewerActive: widget.viewerActive,
               selectedTop: selectedTop,
               selectedBottom: selectedBottom,
               isFavourite: _currentOutfitIsFavourite,
@@ -3354,11 +3357,13 @@ class _AvatarBodyOption extends StatelessWidget {
 
 
 class _ThreeDAvatarPreview extends StatefulWidget {
+  final bool active;
   final WardrobeItem? selectedTop;
   final WardrobeItem? selectedBottom;
 
   const _ThreeDAvatarPreview({
     super.key,
+    required this.active,
     required this.selectedTop,
     required this.selectedBottom,
   });
@@ -3368,22 +3373,13 @@ class _ThreeDAvatarPreview extends StatefulWidget {
 }
 
 class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
-  // Flutter Web platform-view factories cannot be unregistered. Using one
-  // static view type across login sessions leaves the next Home page pointing
-  // at the iframe from the previous (disposed) session.
-  //
-  // Give every avatar preview instance its own view type and iframe instead.
-  static int _nextViewerId = 0;
-
-  late final String _viewType =
-      'textyle-three-outfit-dynamic-${_nextViewerId++}';
-
-  bool _viewRegistered = false;
   html.IFrameElement? _iframe;
   StreamSubscription<html.Event>? _iframeLoadSubscription;
   String? _lastAvatarAsset;
+  bool _viewerLoaded = false;
+  int _viewerRevision = 0;
 
-  double _pendingRotationDelta = 0;
+  double _rotationDelta = 0;
   bool _rotationFrameScheduled = false;
 
   AvatarBodyType get _bodyType =>
@@ -3399,49 +3395,65 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
       path: '/outfit_viewer.html',
       queryParameters: <String, String>{
         'avatar': avatarAsset,
-        'viewerRevision': 'closer-thread-v1',
+        'viewerRevision': 'home-resume-v2',
         if (_topAsset.isNotEmpty && !isStoredGarmentMedia(_topAsset)) 'top': _topAsset,
         if (_bottomAsset.isNotEmpty && !isStoredGarmentMedia(_bottomAsset)) 'bottom': _bottomAsset,
       },
     ).toString();
   }
 
-  void _registerViewer(String avatarAsset) {
-    if (_viewRegistered) return;
-    _viewRegistered = true;
+  void _attachViewer(Object element, String avatarAsset, int revision) {
+    if (!mounted || !widget.active || revision != _viewerRevision) return;
+    _detachViewer();
+    final iframe = element as html.IFrameElement;
+    _iframe = iframe;
+    iframe
+      ..setAttribute('scrolling', 'no')
+      ..setAttribute('allow', 'fullscreen')
+      ..setAttribute('title', '3D outfit preview');
+    iframe.style
+      ..width = '100%'
+      ..height = '100%'
+      ..border = '0'
+      ..backgroundColor = 'transparent'
+      ..pointerEvents = 'none'
+      ..touchAction = 'none';
+    _iframeLoadSubscription = iframe.onLoad.listen((_) {
+      if (!mounted || !widget.active || !identical(_iframe, iframe)) return;
+      _viewerLoaded = true;
+      unawaited(_syncEntireOutfit());
+    });
+    iframe.src = _buildViewerSource(avatarAsset);
+  }
 
-    ui_web.platformViewRegistry.registerViewFactory(
-      _viewType,
-      (int viewId) {
-        final iframe = html.IFrameElement()
-          ..src = _buildViewerSource(avatarAsset)
-          ..setAttribute('scrolling', 'no')
-          ..setAttribute('allow', 'fullscreen');
+  void _detachViewer() {
+    ++_outfitSyncToken;
+    _viewerLoaded = false;
+    _iframeLoadSubscription?.cancel();
+    _iframeLoadSubscription = null;
+    _iframe = null;
+  }
 
-        iframe.style
-          ..width = '100%'
-          ..height = '100%'
-          ..border = '0'
-          ..backgroundColor = 'transparent'
-          ..pointerEvents = 'none'
-          ..touchAction = 'none';
-
-        _iframe = iframe;
-        _iframeLoadSubscription?.cancel();
-        _iframeLoadSubscription =
-            iframe.onLoad.listen((_) => _syncEntireOutfit());
-        return iframe;
-      },
-    );
+  void _reloadViewer() {
+    _detachViewer();
+    setState(() => ++_viewerRevision);
   }
 
   void _postMessage(Map<String, Object> message) {
-    _iframe?.contentWindow?.postMessage(message, '*');
+    final iframe = _iframe;
+    if (!widget.active || !_viewerLoaded || iframe == null || iframe.isConnected != true) return;
+    try {
+      iframe.contentWindow?.postMessage(message, html.window.location.origin!);
+    } on Object {
+      // A frame can become unavailable between checking it and sending. The
+      // outfit belongs to Home, so rebuilding only the frame remains safe.
+      _viewerLoaded = false;
+    }
   }
 
   int _outfitSyncToken = 0;
   Future<void> _syncEntireOutfit() async {
-    if (!mounted) return;
+    if (!mounted || !widget.active || !_viewerLoaded) return;
     final token = ++_outfitSyncToken;
     final avatarAsset = context.read<AvatarSettings>().avatarAsset;
     final top = _topAsset, bottom = _bottomAsset;
@@ -3454,11 +3466,13 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
     _postMessage(<String, Object>{
       'type': 'textyle-set-body-outfit', 'avatar': avatarAsset,
       'top': urls[0] ?? '', 'bottom': urls[1] ?? '',
+      'rotationDeltaX': _rotationDelta,
     });
   }
 
   void _queueRotation(double deltaX) {
-    _pendingRotationDelta += deltaX;
+    if (!widget.active) return;
+    _rotationDelta += deltaX;
     if (_rotationFrameScheduled) return;
 
     _rotationFrameScheduled = true;
@@ -3466,13 +3480,9 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
       _rotationFrameScheduled = false;
       if (!mounted) return;
 
-      final delta = _pendingRotationDelta;
-      _pendingRotationDelta = 0;
-
-      if (delta.abs() < 0.01) return;
       _postMessage(<String, Object>{
-        'type': 'textyle-rotate-avatar',
-        'deltaX': delta,
+        'type': 'textyle-set-view-rotation',
+        'rotationDeltaX': _rotationDelta,
       });
     });
   }
@@ -3492,6 +3502,11 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
   void didUpdateWidget(covariant _ThreeDAvatarPreview oldWidget) {
     super.didUpdateWidget(oldWidget);
 
+    if (oldWidget.active && !widget.active) {
+      _detachViewer();
+      ++_viewerRevision;
+      return;
+    }
     if ((oldWidget.selectedTop?.modelAssetFor(_bodyType) ?? '') != _topAsset ||
         (oldWidget.selectedBottom?.modelAssetFor(_bodyType) ?? '') != _bottomAsset) {
       _syncEntireOutfit();
@@ -3500,41 +3515,53 @@ class _ThreeDAvatarPreviewState extends State<_ThreeDAvatarPreview> {
 
   @override
   void dispose() {
-    _iframeLoadSubscription?.cancel();
-    _iframeLoadSubscription = null;
-
-    final iframe = _iframe;
-    _iframe = null;
-    if (iframe != null) {
-      iframe.src = 'about:blank';
-      iframe.remove();
-    }
-
+    _detachViewer();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final avatarAsset = context.watch<AvatarSettings>().avatarAsset;
-    _registerViewer(avatarAsset);
+    // Retain the outfit and scroll state, but release the browser renderer
+    // while Home is hidden. A failed iframe must not be reused on return.
+    if (!widget.active) return const SizedBox(height: 440);
+    final revision = _viewerRevision;
 
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onHorizontalDragUpdate: (details) {
-        _queueRotation(details.delta.dx);
-      },
-      child: SizedBox(
-        width: double.infinity,
-        height: 440,
-        child: ClipRect(
-          child: HtmlElementView(viewType: _viewType),
-        ),
+    return SizedBox(
+      width: double.infinity,
+      height: 440,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onHorizontalDragUpdate: (details) => _queueRotation(details.delta.dx),
+              child: ClipRect(
+                child: HtmlElementView.fromTagName(
+                  key: ValueKey(revision),
+                  tagName: 'iframe',
+                  onElementCreated: (element) => _attachViewer(element, avatarAsset, revision),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 0,
+            right: 0,
+            child: IconButton(
+              tooltip: 'Reload 3D viewer',
+              onPressed: _reloadViewer,
+              icon: const Icon(Icons.refresh_rounded, color: AppColors.textMuted),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _FloatingOutfitHero extends StatelessWidget {
+  final bool viewerActive;
   final WardrobeItem? selectedTop;
   final WardrobeItem? selectedBottom;
   final bool isFavourite;
@@ -3542,6 +3569,7 @@ class _FloatingOutfitHero extends StatelessWidget {
   final VoidCallback onWeatherTap;
 
   const _FloatingOutfitHero({
+    required this.viewerActive,
     required this.selectedTop,
     required this.selectedBottom,
     required this.isFavourite,
@@ -3588,6 +3616,7 @@ class _FloatingOutfitHero extends StatelessWidget {
             right: 0,
             child: Center(
               child: _ThreeDAvatarPreview(
+                active: viewerActive,
                 selectedTop: selectedTop,
                 selectedBottom: selectedBottom,
               ),
